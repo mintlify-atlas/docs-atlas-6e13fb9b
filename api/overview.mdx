@@ -29,7 +29,7 @@ The port is set in `config.yml`. If tuliprox is behind a reverse proxy with a `p
     Serve Electronic Programme Guide data in XMLTV format. Endpoints: `GET /xmltv.php`, `GET /epg`, `GET /update/epg.php`.
   </Card>
   <Card title="Management API (v1)" icon="wrench" href="/api/v1">
-    REST API for the web UI and automation. Configuration, playlist management, and user CRUD. All routes under `/api/v1/`.
+    REST API for the web UI and automation. Configuration, playlist management, library management, and user CRUD. All routes under `/api/v1/`.
   </Card>
   <Card title="Authentication" icon="lock" href="/api/authentication">
     How username/password, token, and JWT credentials work across all API surfaces.
@@ -41,7 +41,9 @@ The port is set in `config.yml`. If tuliprox is behind a reverse proxy with a `p
 The default port is `8901`. Change it in `config.yml`:
 
 ```yaml
-port: 8901
+api:
+  host: 0.0.0.0
+  port: 8901
 ```
 
 If you run tuliprox behind a reverse proxy and want a URL path prefix, set `path` in `api-proxy.yml`:

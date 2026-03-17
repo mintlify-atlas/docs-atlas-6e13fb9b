@@ -98,12 +98,12 @@ curl -H "Authorization: Bearer $TOKEN" http://localhost:8901/api/v1/ipinfo
 GET /api/v1/config
 ```
 
-Returns the current `config.yml`, `sources.yml`, and `api-proxy.yml` contents merged into a single JSON object. Response headers include revision hashes for each file:
+Returns the current `config.yml`, `source.yml`, and `api-proxy.yml` contents merged into a single JSON object. Response headers include revision hashes for each file:
 
 | Header | Description |
 |---|---|
 | `x-config-main-revision` | BLAKE3 hash of `config.yml` |
-| `x-config-sources-revision` | BLAKE3 hash of `sources.yml` |
+| `x-config-sources-revision` | BLAKE3 hash of `source.yml` |
 | `x-config-api-proxy-revision` | BLAKE3 hash of `api-proxy.yml` |
 
 ```bash
@@ -150,7 +150,7 @@ Saves a new `config.yml`. Requires the `If-Match` header to contain the current 
 POST /api/v1/config/sources
 ```
 
-Saves a new `sources.yml`. Same `If-Match` / `x-config-sources-revision` revision-check protocol as `config/main`.
+Saves a new `source.yml`. Same `If-Match` / `x-config-sources-revision` revision-check protocol as `config/main`.
 
 **Request body:** JSON `SourcesConfigDto` object.
 
@@ -202,7 +202,7 @@ Downloads the raw batch CSV file for a given input. Returns `text/csv`.
 POST /api/v1/config/xtream/login-info
 ```
 
-Attempts to log in to an Xtream Codes provider and returns the login response. Useful for verifying provider credentials before saving them in `sources.yml`.
+Attempts to log in to an Xtream Codes provider and returns the login response. Useful for verifying provider credentials before saving them in `source.yml`.
 
 **Request body:**
 
@@ -419,6 +419,64 @@ Proxy for obfuscated resource URLs (e.g., cover images) embedded in web UI playl
 
 ---
 
+## Library management
+
+These endpoints are available only when `library.enabled: true` in `config.yml`.
+
+### Trigger library scan
+
+```
+POST /api/v1/library/scan
+```
+
+Starts a background scan of the configured library directories. Returns `202 Accepted` immediately; the scan runs asynchronously. If a scan is already in progress, returns `400 Bad Request`.
+
+**Request body:**
+
+```json
+{ "force_rescan": false }
+```
+
+<ParamField body="force_rescan" type="boolean">
+  When `true`, forces a full re-scan of all library directories even if files have not changed.
+</ParamField>
+
+| Status | Meaning |
+|---|---|
+| `202 Accepted` | Scan started. |
+| `400 Bad Request` | Library not enabled or scan already in progress. |
+
+```bash
+curl -X POST http://localhost:8901/api/v1/library/scan \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"force_rescan": false}'
+```
+
+---
+
+### Get library status
+
+```
+GET /api/v1/library/status
+```
+
+Returns the current status of the local media library, including item counts.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8901/api/v1/library/status
+```
+
+<Expandable title="Response fields">
+  <ResponseField name="enabled" type="boolean">Whether the library is enabled.</ResponseField>
+  <ResponseField name="total_items" type="number">Total number of items in the library.</ResponseField>
+  <ResponseField name="movies" type="number">Number of movie entries.</ResponseField>
+  <ResponseField name="series" type="number">Number of series entries.</ResponseField>
+  <ResponseField name="path" type="string | null">Path to the metadata storage directory.</ResponseField>
+</Expandable>
+
+---
+
 ## User management
 
 These endpoints manage proxy users in `api-proxy.yml` (or the user database when `use_user_db: true`).
@@ -432,7 +490,7 @@ POST /api/v1/user/{target}
 Creates a new user credential under the specified target.
 
 <ParamField path="target" type="string" required>
-  The target name (as defined in `sources.yml`) to associate the user with.
+  The target name (as defined in `source.yml`) to associate the user with.
 </ParamField>
 
 **Request body:** JSON `ProxyUserCredentialsDto` object:

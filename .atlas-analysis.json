@@ -1,0 +1,124 @@
+{
+  "projectType": "saas",
+  "projectName": "tuliprox",
+  "projectDescription": "A high-performance IPTV proxy and playlist processor written in Rust that ingests M3U/Xtream sources, reshapes and filters them, and delivers streams to Plex, Jellyfin, Emby, Kodi and similar media clients.",
+  "theme": "aspen",
+  "primaryColor": "#5c64f4",
+  "lightColor": "#acb4fc",
+  "darkColor": "#ffffff",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "getting-started"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/overview",
+              "features/playlist-processing",
+              "features/streaming-and-proxy",
+              "features/local-media-library",
+              "features/monitoring-and-alerts"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/overview",
+              "configuration/main-config",
+              "configuration/sources-and-targets",
+              "configuration/api-proxy",
+              "configuration/mapping-and-templates",
+              "configuration/schedules"
+            ]
+          },
+          {
+            "group": "Deployment",
+            "pages": [
+              "deployment/docker",
+              "deployment/binary",
+              "deployment/building-from-source"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/xtream-setup",
+              "guides/m3u-setup",
+              "guides/hdhomerun-integration",
+              "guides/plex-jellyfin-emby",
+              "guides/filtering-and-mapping",
+              "guides/examples-and-recipes"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "operations/monitoring",
+              "operations/troubleshooting",
+              "operations/upgrading"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/m3u",
+              "api/xtream",
+              "api/hdhomerun",
+              "api/xmltv",
+              "api/v1"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "M3U/M3U8 and Xtream Codes playlist ingestion and transformation",
+    "Reverse proxy and redirect modes for live IPTV streams",
+    "Advanced filtering with expressive boolean/regex DSL",
+    "Multi-source merging and custom target publishing",
+    "HDHomeRun emulation for Plex, Emby, Jellyfin and TVHeadend",
+    "Local media library scanning with TMDB metadata enrichment",
+    "Scheduled playlist updates with cron expressions",
+    "Multi-user access control with per-target credentials",
+    "Stream sharing, priority preemption and custom fallback videos",
+    "Notifications via Telegram, Discord, Pushover and REST webhooks",
+    "Web UI with hot config reload support",
+    "Docker and static binary deployment"
+  ],
+  "publicApiSurface": [
+    "GET /get.php (M3U playlist endpoint)",
+    "GET /xmltv.php (XMLTV/EPG endpoint)",
+    "POST /player_api.php (Xtream Codes API)",
+    "GET /hdhomerun/* (HDHomeRun emulation endpoints)",
+    "GET /hls/* (HLS stream proxy)",
+    "GET /v1/* (REST management API)",
+    "WS /ws (WebSocket events)",
+    "CLI: tuliprox -s (server mode)",
+    "CLI: tuliprox -c <config> -i <source> (CLI mode)",
+    "CLI: tuliprox --genpwd (password hash generation)",
+    "CLI: tuliprox --healthcheck (health probe)",
+    "CLI: tuliprox --scan-library (trigger library scan)"
+  ]
+}

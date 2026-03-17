@@ -1,0 +1,81 @@
+---
+title: "Introduction"
+description: "tuliprox is a self-hosted IPTV proxy and playlist processor written in Rust. It sits between your IPTV providers and your media clients, giving you complete control over how streams are filtered, reshaped, and delivered."
+---
+
+## What is tuliprox?
+
+tuliprox ingests M3U/M3U8 playlists and Xtream Codes sources, reshapes them into clean outputs, and serves them to media clients like Plex, Jellyfin, Emby, and Kodi. You deploy it once, point your IPTV provider credentials at it, and serve curated playlists to every client in your home or organization.
+
+Because tuliprox proxies and processes streams at the application layer, it can:
+
+- Hide provider credentials from end users
+- Enforce connection limits per user
+- Share a single upstream stream across multiple clients
+- Apply complex filters so clients see only the channels you want
+- Merge multiple providers into one unified playlist
+
+## Who is tuliprox for?
+
+tuliprox is designed for self-hosters and developers who want fine-grained control over their IPTV setup. You will get the most value from it if you:
+
+- Subscribe to one or more IPTV providers and want to unify or clean up their playlists
+- Run Plex, Jellyfin, Emby, or Kodi and want a stable, filtered playlist source
+- Need to share an IPTV subscription across multiple users without exposing provider credentials
+- Want to augment live TV with a local media library and serve everything through a single Xtream or M3U endpoint
+
+## Key capabilities
+
+<CardGroup cols={2}>
+  <Card title="Playlist processing" icon="filter" href="/features/playlist-processing">
+    Filter, rename, map, sort, and merge channels from multiple providers into curated targets.
+  </Card>
+  <Card title="Reverse proxy" icon="arrow-right-arrow-left" href="/features/streaming-and-proxy">
+    Proxy streams with per-user connection limits, stream sharing, priority preemption, and fallback videos.
+  </Card>
+  <Card title="Multiple output formats" icon="tv" href="/features/overview">
+    Publish as M3U, Xtream Codes API, HDHomeRun device emulation, or STRM files.
+  </Card>
+  <Card title="Local media library" icon="folder-open" href="/features/local-media-library">
+    Scan local video files, resolve TMDB metadata, and serve movies and series alongside live TV.
+  </Card>
+  <Card title="Scheduled updates" icon="clock" href="/configuration/schedules">
+    Keep playlists fresh with cron-based background refreshes. No manual intervention needed.
+  </Card>
+  <Card title="Monitoring and alerts" icon="bell" href="/features/monitoring-and-alerts">
+    Send notifications via Telegram, Pushover, or a custom REST endpoint when problems occur.
+  </Card>
+</CardGroup>
+
+## How it works
+
+tuliprox reads one or more `inputs` (M3U URLs, Xtream Codes credentials, or local directories), processes them through filters and mapping rules you define, and writes the results to one or more `targets`. Each target can publish its output in multiple formats simultaneously.
+
+In server mode, tuliprox also acts as a live proxy: when a client requests a stream, tuliprox forwards the request to the upstream provider and relays the data back, optionally sharing the connection with other clients watching the same channel.
+
+```
+IPTV providers  →  tuliprox (filter, rename, proxy)  →  Plex / Jellyfin / Kodi / VLC
+```
+
+## What problems does it solve?
+
+| Problem | How tuliprox helps |
+|---------|--------------------|
+| Provider playlist has thousands of unorganized channels | Filter and rename with a regex-based DSL |
+| Multiple providers with overlapping content | Merge and deduplicate into one clean output |
+| Clients need Xtream Codes API but provider only offers M3U | Translate M3U to Xtream output automatically |
+| Sharing a subscription without exposing credentials | Create per-user credentials in `api-proxy.yml` |
+| Provider bans IPs that open too many connections | Share streams across users and limit connections |
+| Plex or Emby can't find an HDHomeRun tuner | Emulate an HDHomeRun device that these apps discover natively |
+| VOD metadata is missing or incorrect | Resolve titles via TMDB and serve enriched metadata |
+
+## Ready to get started?
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get tuliprox running with Docker in under 5 minutes.
+  </Card>
+  <Card title="Getting started" icon="book-open" href="/getting-started">
+    Learn about run modes, CLI flags, and the recommended first-milestone workflow.
+  </Card>
+</CardGroup>

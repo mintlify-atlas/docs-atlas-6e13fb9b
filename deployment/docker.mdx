@@ -1,0 +1,222 @@
+---
+title: "Docker deployment"
+description: "Run tuliprox with Docker or Docker Compose, including volume mounts, environment variables, healthchecks, and container templates."
+---
+
+The recommended way to run tuliprox in production is with Docker. Pre-built Alpine images are published to the GitHub Container Registry.
+
+**Available image:** `ghcr.io/euzu/tuliprox-alpine:latest`
+
+## Quick start with Docker Compose
+
+<Steps>
+  <Step title="Create a docker-compose.yml">
+    Create a `docker-compose.yml` file in your working directory:
+
+    ```yaml docker-compose.yml
+    services:
+      tuliprox:
+        container_name: tuliprox
+        image: ghcr.io/euzu/tuliprox-alpine:latest
+        working_dir: /app
+        volumes:
+          - /home/tuliprox/tuliprox:/app/tuliprox
+          - /home/tuliprox/config:/app/config
+          - /home/tuliprox/data:/app/data
+          - /home/tuliprox/cache:/app/cache
+        environment:
+          - TZ=Europe/Paris
+        ports:
+          - "8901:8901"
+        restart: unless-stopped
+    ```
+  </Step>
+
+  <Step title="Start the container">
+    ```bash
+    docker compose up -d
+    ```
+  </Step>
+
+  <Step title="Open the Web UI">
+    Navigate to `http://localhost:8901` in your browser and complete the initial configuration.
+  </Step>
+</Steps>
+
+## Volume mounts
+
+| Mount | Purpose |
+|-------|---------|
+| `/app/tuliprox` | Binary and runtime files |
+| `/app/config` | Configuration files (`config.yml`, `source.yml`, etc.) |
+| `/app/data` | Persistent data, backups, and downloads |
+| `/app/cache` | Cache directory for playlist and metadata caching |
+
+<Tip>
+  Map these volumes to host directories you control. All paths inside the container are relative to `/app`.
+</Tip>
+
+## Environment variables
+
+| Variable | Example | Description |
+|----------|---------|-------------|
+| `TZ` | `Europe/Paris` | Container timezone. Affects log timestamps and scheduled tasks. |
+
+## Port mapping
+
+tuliprox listens on port `8901` by default. The compose snippet `"8901:8901"` publishes it on the same host port.
+
+## Restart policies
+
+Use `restart: unless-stopped` for most setups. For tighter control, use `restart: on-failure`.
+
+## Healthcheck
+
+tuliprox supports a built-in healthcheck command:
+
+```bash
+tuliprox --healthcheck
+```
+
+Wire this into Docker's healthcheck:
+
+```yaml
+healthcheck:
+  test: ["CMD", "/app/tuliprox", "-p", "/app/config", "--healthcheck"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 10s
+```
+
+## Running with docker run
+
+For a quick test without Compose:
+
+```bash
+docker run -d \
+  --name tuliprox \
+  -p 8901:8901 \
+  -v /home/tuliprox/config:/app/config \
+  -v /home/tuliprox/data:/app/data \
+  -v /home/tuliprox/cache:/app/cache \
+  -e TZ=Europe/Paris \
+  --restart unless-stopped \
+  ghcr.io/euzu/tuliprox-alpine:latest
+```
+
+## Building the image from source
+
+To build a local image from the repository root:
+
+```bash
+docker build --rm -f docker/Dockerfile -t tuliprox .
+```
+
+You can target specific architectures or final stages:
+
+```bash
+# scratch-based minimal image (x86_64)
+docker build --rm -f docker/Dockerfile -t tuliprox \
+  --target scratch-final \
+  --build-arg RUST_TARGET=x86_64-unknown-linux-musl .
+
+# Alpine-based image (aarch64)
+docker build --rm -f docker/Dockerfile -t tuliprox \
+  --target alpine-final \
+  --build-arg RUST_TARGET=aarch64-unknown-linux-musl .
+```
+
+Available `RUST_TARGET` values: `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`, `armv7-unknown-linux-musleabihf`.
+
+After building, update your compose file to reference your local image:
+
+```yaml
+image: tuliprox
+```
+
+## Container templates
+
+The repository ships ready-to-use Docker Compose templates for common production stacks under `docker/container-templates/`.
+
+| Template | Folder | Purpose |
+|----------|--------|---------|
+| Traefik | `container-templates/traefik/` | Reverse proxy with TLS (ACME/DNS), dashboard, security middlewares |
+| Gluetun | `container-templates/gluetun/` | VPN egress via WireGuard with SOCKS5, HTTP, and Shadowsocks sidecars |
+| CrowdSec | `container-templates/crowdsec/` | Intrusion detection with Traefik and firewall bouncers |
+| tuliprox | `container-templates/tuliprox/` | tuliprox wired for Traefik reverse proxying on port 8901 |
+
+### Setting up the full stack
+
+<Steps>
+  <Step title="Create shared Docker networks">
+    ```bash
+    docker network create proxy-net
+    docker network create crowdsec-net
+    ```
+  </Step>
+
+  <Step title="Start Traefik">
+    ```bash
+    cd container-templates/traefik
+    touch config/acme.json && chmod 600 config/acme.json
+    echo "<your-dns-api-token>" > cf-token && chmod 600 cf-token
+    ```
+
+    Edit `.env` to set `TZ`, `TRAEFIK_DASHBOARD_CREDENTIALS`, `CF_API_EMAIL`, and `CF_DNS_API_TOKEN_FILE`. Then start:
+
+    ```bash
+    docker compose up -d
+    docker logs -f traefik
+    ```
+  </Step>
+
+  <Step title="Start Gluetun (optional VPN egress)">
+    Edit `container-templates/gluetun/gluetun-02/.env.wg-02` with your WireGuard credentials, then:
+
+    ```bash
+    docker compose -f container-templates/gluetun/gluetun-02/docker-compose.yml up -d
+    ```
+  </Step>
+
+  <Step title="Start tuliprox">
+    ```bash
+    docker compose -f container-templates/tuliprox/docker-compose.yml up -d
+    docker logs -f tuliprox
+    ```
+  </Step>
+
+  <Step title="Start CrowdSec (optional)">
+    ```bash
+    docker compose -f container-templates/crowdsec/docker-compose.yml up -d
+    ```
+  </Step>
+</Steps>
+
+### Traefik labels for tuliprox
+
+The tuliprox template includes Traefik labels. Adjust the hostnames and middlewares for your domain:
+
+```yaml
+labels:
+  - "traefik.enable=true"
+
+  # HTTP
+  - "traefik.http.routers.tuliprox.entrypoints=web"
+  - "traefik.http.routers.tuliprox.rule=Host(`cdn.example.com`)"
+  - "traefik.http.routers.tuliprox.middlewares=redirect-to-https@file"
+
+  # HTTPS
+  - "traefik.http.routers.tuliprox-secure.entrypoints=websecure"
+  - "traefik.http.routers.tuliprox-secure.rule=Host(`cdn.example.com`)"
+  - "traefik.http.routers.tuliprox-secure.tls=true"
+  - "traefik.http.routers.tuliprox-secure.tls.certresolver=cloudflare"
+  - "traefik.http.routers.tuliprox-secure.middlewares=default-security-headers@file"
+
+  # Service port
+  - "traefik.http.services.tuliprox.loadbalancer.server.port=8901"
+```
+
+<Warning>
+  Replace `cdn.example.com` and all other placeholder hostnames with your actual domain. The templates ship with example domains like `cdn.tuliprox.io` that are not functional.
+</Warning>

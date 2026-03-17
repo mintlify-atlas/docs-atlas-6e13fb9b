@@ -1,97 +1,105 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "tuliprox"
+description: "High-performance IPTV proxy and playlist processor written in Rust. Ingest M3U/Xtream sources, filter and reshape them, and deliver streams to Plex, Jellyfin, Emby, Kodi and more."
 ---
 
-## Setting up
-
-Get your documentation site up and running in minutes.
-
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get tuliprox running with Docker in minutes and serve your first IPTV playlist.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Getting Started" icon="book-open" href="/getting-started">
+    Understand run modes, CLI arguments, and the recommended configuration workflow.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Configuration Reference" icon="sliders" href="/configuration/main-config">
+    Full reference for config.yml, source.yml, api-proxy.yml and all subsystems.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="API Reference" icon="code" href="/api/overview">
+    Explore the M3U, Xtream Codes, HDHomeRun, XMLTV and management API endpoints.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## What is tuliprox?
 
-Everything you need to create world-class documentation.
+tuliprox is a self-hosted IPTV proxy and playlist processor. It sits between your IPTV providers and your media clients, giving you full control over how streams are filtered, renamed, merged and delivered.
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
+<CardGroup cols={3}>
+  <Card title="Playlist Processing" icon="filter" href="/features/playlist-processing">
+    Filter, rename, map and sort channels. Merge multiple providers into curated outputs.
   </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
+  <Card title="Reverse Proxy" icon="arrow-right-arrow-left" href="/features/streaming-and-proxy">
+    Proxy streams with user limits, shared connections, priority preemption and fallback videos.
   </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
+  <Card title="Xtream & M3U" icon="tv" href="/guides/xtream-setup">
+    Ingest Xtream Codes and M3U sources. Publish as Xtream, M3U, HDHomeRun or STRM outputs.
   </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
+  <Card title="HDHomeRun" icon="satellite-dish" href="/features/overview">
+    Emulate HDHomeRun devices so Plex, Emby, Jellyfin and TVHeadend discover tuliprox natively.
   </Card>
-</Columns>
+  <Card title="Local Media Library" icon="folder-open" href="/features/local-media-library">
+    Scan local video files and enrich them with TMDB metadata. Serve alongside live TV.
+  </Card>
+  <Card title="Notifications" icon="bell" href="/features/monitoring-and-alerts">
+    Get alerts via Telegram, Discord, Pushover or REST webhooks when issues occur.
+  </Card>
+</CardGroup>
 
-## Need inspiration?
+## Supported input and output formats
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<Tabs>
+  <Tab title="Inputs">
+    | Format | Description |
+    |--------|-------------|
+    | `m3u` / `m3u8` | Standard M3U playlist over HTTP or local file |
+    | `xtream` | Xtream Codes API (live, VOD, series) |
+    | `library` | Local video files from disk |
+    | `m3u_batch` / `xtream_batch` | Batch multiple sources from a single URL |
+  </Tab>
+  <Tab title="Outputs">
+    | Format | Description |
+    |--------|-------------|
+    | `m3u` | Standard M3U playlist for any IPTV player |
+    | `xtream` | Xtream Codes API for compatible clients |
+    | `hdhomerun` | HDHomeRun device emulation |
+    | `strm` | STRM files for Kodi, Plex, Jellyfin and Emby |
+  </Tab>
+  <Tab title="Clients">
+    tuliprox is tested with: **Plex**, **Jellyfin**, **Emby**, **Kodi**, **VLC**, **TiviMate**, **Sparkle**, **Xteve**, **TVHeadend**, and any M3U-compatible player.
+  </Tab>
+</Tabs>
+
+## Quick Docker start
+
+```yaml docker-compose.yml
+services:
+  tuliprox:
+    container_name: tuliprox
+    image: ghcr.io/euzu/tuliprox-alpine:latest
+    working_dir: /app
+    volumes:
+      - /home/tuliprox/tuliprox:/app/tuliprox
+      - /home/tuliprox/config:/app/config
+      - /home/tuliprox/data:/app/data
+      - /home/tuliprox/cache:/app/cache
+    environment:
+      - TZ=Europe/Paris
+    ports:
+      - "8901:8901"
+    restart: unless-stopped
+```
+
+Open `http://localhost:8901` after startup to access the Web UI and continue configuration.
+
+## Key features
+
+- **Advanced filtering** — expressive boolean/regex DSL: `(Group ~ "^FR.*") AND NOT (Group ~ ".*XXX.*")`
+- **Multi-source merging** — combine multiple providers into a single curated target
+- **Stream sharing** — multiple users share one upstream connection to reduce provider load
+- **Priority preemption** — higher-priority users can displace lower-priority connections
+- **Scheduled updates** — cron-based playlist refreshes keep channels current
+- **Hot config reload** — update mapping and API-proxy configuration without restarts
+- **Provider failover** — automatic rotation on timeouts and HTTP errors
+- **DNS-aware routing** — resolve and rotate provider IPs for resilience
+
+<Note>
+  tuliprox is licensed under the MIT License. Source code is available at [github.com/euzu/tuliprox](https://github.com/euzu/tuliprox).
+</Note>

@@ -1,0 +1,172 @@
+---
+title: "Building from source"
+description: "Build the tuliprox backend, frontend, and documentation from source, including cross-compilation and Docker image builds."
+---
+
+tuliprox consists of a Rust backend, a Yew/WebAssembly frontend, and mdBook-generated documentation. You can build each component individually or use the provided Makefile and helper scripts.
+
+## Prerequisites
+
+<Steps>
+  <Step title="Install the Rust toolchain">
+    ```bash
+    curl -sL https://sh.rustup.rs | sh -s -- -y
+    ```
+
+    Or use the Makefile target:
+
+    ```bash
+    make rustup
+    ```
+  </Step>
+
+  <Step title="Install build tools">
+    ```bash
+    make install-tools
+    ```
+
+    This installs: `cross`, `trunk`, `wasm-bindgen-cli`, `cargo-set-version`, `mdbook`, and `markdownlint-cli2`.
+
+    To install tools individually:
+
+    ```bash
+    make cross      # multi-platform build tool
+    make trunk      # frontend build tool
+    make mdbook     # documentation generator
+    ```
+  </Step>
+
+  <Step title="Install wasm-opt">
+    Trunk requires a compatible `wasm-opt` binary in `PATH` to optimize the WebAssembly output.
+
+    ```bash
+    ./bin/install_wasm_tools.sh 128
+    export PATH="$PWD/.tools/wasm-tools/version_128/bin:$PATH"
+    ```
+
+    The script downloads binaryen version 128 into `.tools/wasm-tools/version_128/bin/`.
+  </Step>
+</Steps>
+
+## Building the backend
+
+```bash
+cargo build -p tuliprox --release
+```
+
+The output binary is at `target/release/tuliprox`.
+
+## Building the frontend
+
+The frontend build also generates the documentation site and copies it into the frontend distribution:
+
+```bash
+./bin/build_fe.sh release
+```
+
+This script:
+
+1. Runs `bin/build_docs.sh` to build mdBook docs into `frontend/build/docs`
+2. Runs `trunk build --release` to compile the Yew/WASM frontend into `frontend/dist`
+3. Copies `frontend/build/docs` into `frontend/dist/static/docs`
+
+For a debug build:
+
+```bash
+./bin/build_fe.sh debug
+```
+
+## Building the documentation only
+
+```bash
+make docs
+```
+
+Output goes to `frontend/build/docs`. To preview locally:
+
+```bash
+make docs-serve
+```
+
+## Full build (backend + frontend + docs)
+
+```bash
+make web-dist
+```
+
+This builds documentation with mdBook, then calls `./bin/build_fe.sh release` to produce the complete set of web assets.
+
+## Build targets
+
+<Tabs>
+  <Tab title="Linux x86_64 (musl)">
+    ```bash
+    cross build -p tuliprox --release --target x86_64-unknown-linux-musl
+    ```
+  </Tab>
+  <Tab title="Linux aarch64 (musl)">
+    ```bash
+    cross build -p tuliprox --release --target aarch64-unknown-linux-musl
+    ```
+  </Tab>
+  <Tab title="armv7 (Raspberry Pi)">
+    ```bash
+    cross build -p tuliprox --release --target armv7-unknown-linux-musleabihf
+    ```
+  </Tab>
+  <Tab title="Windows x86_64">
+    ```bash
+    rustup target add x86_64-pc-windows-gnu
+    cargo build -p tuliprox --release --target x86_64-pc-windows-gnu
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  `cross` uses Docker to provide the correct cross-compilation toolchain for each target. Install it with `cargo install cross`.
+</Note>
+
+## Building a Docker image from source
+
+Build the full multi-stage Docker image from the repository root:
+
+```bash
+docker build --rm -f docker/Dockerfile -t tuliprox .
+```
+
+Target a specific architecture or final stage:
+
+<CodeGroup>
+
+```bash scratch image (x86_64)
+docker build --rm -f docker/Dockerfile -t tuliprox \
+  --target scratch-final \
+  --build-arg RUST_TARGET=x86_64-unknown-linux-musl .
+```
+
+```bash alpine image (aarch64)
+docker build --rm -f docker/Dockerfile -t tuliprox \
+  --target alpine-final \
+  --build-arg RUST_TARGET=aarch64-unknown-linux-musl .
+```
+
+</CodeGroup>
+
+Available final stages: `scratch-final`, `alpine-final`.
+
+## Helper scripts
+
+The repository ships build helper scripts under `bin/`:
+
+| Script | Purpose |
+|--------|---------|
+| `bin/build_docs.sh` | Build mdBook documentation only |
+| `bin/build_fe.sh` | Build frontend assets (calls build_docs.sh internally) |
+| `bin/build_local.sh` | Full local build (backend + frontend) |
+| `bin/build_docker.sh` | Build and push multi-platform Docker images (CI use) |
+| `bin/release.sh` | Bump version and tag a release |
+| `bin/install_wasm_tools.sh` | Download and install a specific binaryen/wasm-opt version |
+
+<Warning>
+  `bin/build_docker.sh` requires `REPO_OWNER` and `GITHUB_IO_TOKEN` environment variables and is intended for CI pipelines. Do not run it locally without those credentials.
+</Warning>

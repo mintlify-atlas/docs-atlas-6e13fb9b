@@ -1,0 +1,561 @@
+---
+title: "Main configuration (config.yml)"
+description: "Complete reference for all config.yml fields that control the Tuliprox runtime, storage, messaging, metadata, scheduling, Web UI, and more."
+---
+
+`config.yml` controls the application runtime, storage, reverse proxy behavior, and optional subsystems. Relative paths are resolved against the [Tuliprox home directory](/configuration/overview#home-directory-resolution).
+
+## Top-level fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `api` | object | HTTP server host, port, and web root |
+| `storage_dir` | string | Directory for persisted playlists, databases, and metadata |
+| `mapping_path` | string | Path to `mapping.yml` or a directory of mapping files |
+| `template_path` | string | Path to `template.yml` or a directory of template files |
+| `process_parallel` | bool | Enable parallel processing on multi-core systems |
+| `default_user_agent` | string | User-agent sent to upstream providers |
+| `messaging` | object | Optional Telegram, Discord, Pushover, or REST notifications |
+| `video` | object | Extensions, download config, and web search template |
+| `metadata_update` | object | Metadata resolve, probe, TMDB, and FFprobe settings |
+| `schedules` | list | Cron-based scheduled tasks |
+| `reverse_proxy` | object | Stream delivery, buffering, caching, and rate limiting |
+| `backup_dir` | string | Location for Web UI configuration backups |
+| `update_on_boot` | bool | Start a playlist update automatically at launch |
+| `log` | object | Log level and sanitization settings |
+| `web_ui` | object | Web UI visibility, auth, and player settings |
+| `user_access_control` | bool | Enforce expiry, status, and max-connections per user |
+| `connect_timeout_secs` | int | Connect-phase timeout for provider requests (`0` = disabled) |
+| `custom_stream_response_path` | string | Directory of fallback `.ts` streams for error conditions |
+| `custom_stream_response_timeout_secs` | int | Cap playback duration of fallback streams |
+| `user_config_dir` | string | Storage for user-specific config such as bouquets |
+| `hdhomerun` | object | HDHomeRun device emulation for Plex, Jellyfin, Emby |
+| `proxy` | object | Global outgoing proxy for upstream requests |
+| `ipcheck` | object | Endpoints for public IP detection |
+| `config_hot_reload` | bool | Hot-reload mapping and api-proxy config on change |
+| `sleep_timer_mins` | int | Idle sleep timer in minutes |
+| `accept_unsecure_ssl_certificates` | bool | Accept self-signed or invalid SSL certificates |
+| `disk_based_processing` | bool | Use disk instead of memory during playlist processing |
+| `library` | object | Local media library integration |
+
+---
+
+## Core runtime
+
+### `api`
+
+Configures the embedded HTTP server.
+
+```yaml
+api:
+  host: localhost
+  port: 8901
+  web_root: ./web
+```
+
+`web_root` is resolved relative to the Tuliprox home directory when it is not an absolute path.
+
+### `storage_dir`
+
+Storage location for persisted playlists, databases, and metadata.
+
+```yaml
+storage_dir: ./data
+```
+
+### `process_parallel`
+
+Enable parallel processing on multi-core systems. Be aware that multiple worker threads can also consume multiple provider connections simultaneously during updates.
+
+```yaml
+process_parallel: true
+```
+
+### `mapping_path` and `template_path`
+
+Tuliprox loads mappings and templates from a single file or an entire directory.
+
+- If a path points to a directory, all `*.yml` files are loaded in alphanumeric order and merged.
+- Template names must remain globally unique.
+- Defaults: `mapping.yml` and `template.yml` in the home directory.
+
+```yaml
+mapping_path: ./mappings/
+template_path: ./templates/
+```
+
+---
+
+## Provider failover and rotation
+
+Tuliprox supports provider failover and DNS-aware rotation. Providers can expose multiple URLs, and Tuliprox rotates to the next candidate on supported failure conditions.
+
+### `provider://` scheme
+
+Configurations can reference providers via `provider://<provider_name>/...`. Tuliprox resolves that to the current active provider URL or resolved IP.
+
+### Automatic failover triggers
+
+Failover is triggered for the following HTTP status codes:
+
+| Triggers failover | Does not trigger failover |
+|-------------------|---------------------------|
+| Network timeouts | `401` Unauthorized |
+| `408` Request Timeout | `403` Forbidden |
+| `500`, `502`, `503`, `504` | |
+| `404`, `410`, `429` | |
+
+### `proxy` — provider DNS block
+
+Each provider entry can include a `dns` block:
+
+| Field | Description |
+|-------|-------------|
+| `enabled` | Enable DNS-based rotation |
+| `refresh_secs` | How often to re-resolve DNS |
+| `prefer` | `system`, `ipv4`, or `ipv6` |
+| `max_addrs` | Maximum resolved addresses to keep |
+| `schemes` | URL schemes to apply rotation to |
+| `keep_vhost` | Preserve the virtual host header |
+| `overrides` | Static IP overrides per hostname |
+| `on_resolve_error` | Behavior on DNS resolution failure |
+| `on_connect_error` | Behavior on connection failure |
+
+Resolved IPs are persisted in `provider_dns_resolved.json` under `storage_dir`.
+
+```yaml
+provider:
+  - name: my_provider
+    urls:
+      - http://provider-a.example
+      - http://provider-b.example
+    dns:
+      enabled: true
+      refresh_secs: 300
+      prefer: ipv4
+      schemes: [http, https]
+      keep_vhost: true
+      max_addrs: 2
+      on_resolve_error: keep_last_good
+      on_connect_error: try_next_ip
+```
+
+---
+
+## `messaging`
+
+Optional notification system supporting Telegram, Discord, Pushover, and REST webhooks.
+
+### `notify_on` events
+
+| Event | Description |
+|-------|-------------|
+| `info` | General informational messages |
+| `stats` | Playlist update statistics |
+| `error` | Error conditions |
+| `watch` | Group watch notifications |
+
+Templates can be raw strings or `file://` / `http(s)://` URIs. Handlebars variables available in templates: `message`, `kind`, `timestamp`, `stats`, `watch`, `processing`.
+
+<AccordionGroup>
+  <Accordion title="Telegram">
+    ```yaml
+    messaging:
+      notify_on:
+        - info
+        - stats
+        - error
+      telegram:
+        markdown: true
+        bot_token: "<telegram bot token>"
+        chat_ids:
+          - "<chat id>"
+          - "<chat id>:<thread id>"
+    ```
+  </Accordion>
+  <Accordion title="Discord">
+    ```yaml
+    messaging:
+      notify_on:
+        - info
+        - error
+      discord:
+        webhook_url: "https://discord.com/api/webhooks/<id>/<token>"
+    ```
+  </Accordion>
+  <Accordion title="Pushover">
+    ```yaml
+    messaging:
+      notify_on:
+        - info
+        - error
+      pushover:
+        app_token: "<app token>"
+        user_key: "<user key>"
+    ```
+  </Accordion>
+  <Accordion title="REST webhook">
+    ```yaml
+    messaging:
+      notify_on:
+        - info
+        - error
+      rest:
+        url: "https://hooks.example.com/notify"
+        method: POST
+        headers:
+          Authorization: "Bearer <token>"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+---
+
+## `video`
+
+Optional video-related behavior for the Web UI.
+
+| Field | Description |
+|-------|-------------|
+| `extensions` | File extensions treated as video content |
+| `download.directory` | Download destination directory |
+| `download.organize_into_directories` | Organize downloads into subdirectories |
+| `download.episode_pattern` | Regex to extract episode identifiers from filenames |
+| `web_search` | URL template for media searches — `{}` is replaced with the title |
+
+```yaml
+video:
+  web_search: "https://www.imdb.com/search/title/?title={}"
+  extensions: [mkv, mp4, avi]
+  download:
+    directory: /tmp
+    organize_into_directories: true
+    episode_pattern: '.*(?P<episode>[Ss]\d{1,2}(.*?)[Ee]\d{1,2}).*'
+```
+
+---
+
+## `metadata_update`
+
+Controls how Tuliprox resolves metadata, probes streams, queries TMDB, and invokes FFprobe.
+
+<AccordionGroup>
+  <Accordion title="Top-level fields">
+    | Field | Description |
+    |-------|-------------|
+    | `cache_path` | Directory for metadata cache |
+    | `retry_delay` | Delay between retries |
+    | `worker_idle_timeout` | How long a worker waits before shutting down |
+    | `max_queue_size` | Maximum pending metadata tasks |
+    | `no_change_cache_ttl_secs` | TTL when no change is detected |
+    | `probe_fairness_resolve_burst` | Max resolve burst for fairness |
+  </Accordion>
+
+  <Accordion title="log sub-section">
+    | Field | Description |
+    |-------|-------------|
+    | `log.queue_interval` | How often to log queue depth |
+    | `log.progress_interval` | How often to log resolve progress |
+  </Accordion>
+
+  <Accordion title="resolve sub-section">
+    | Field | Description |
+    |-------|-------------|
+    | `resolve.max_retry_backoff` | Maximum backoff duration between retries |
+    | `resolve.min_retry_base` | Minimum base delay for first retry |
+    | `resolve.max_attempts` | Maximum number of resolve attempts |
+    | `resolve.exhaustion_reset_gap` | Gap before resetting exhausted state |
+  </Accordion>
+
+  <Accordion title="probe sub-section">
+    | Field | Description |
+    |-------|-------------|
+    | `probe.cooldown` | Minimum time between probes of the same stream |
+    | `probe.max_attempts` | Maximum probe attempts |
+    | `probe.retry_backoff_step_1` | Backoff after first failed probe |
+    | `probe.retry_backoff_step_2` | Backoff after second failed probe |
+    | `probe.retry_backoff_step_3` | Backoff after third failed probe |
+    | `probe.retry_load_retry_delay` | Delay before retrying a load |
+    | `probe.backoff_jitter_percent` | Random jitter percentage on backoffs |
+    | `probe.user_priority` | Priority for probe tasks (same scale as user priority) |
+  </Accordion>
+
+  <Accordion title="tmdb sub-section">
+    | Field | Description |
+    |-------|-------------|
+    | `tmdb.enabled` | Enable TMDB metadata enrichment |
+    | `tmdb.api_key` | Your TMDB API key |
+    | `tmdb.rate_limit_ms` | Milliseconds between TMDB requests |
+    | `tmdb.cache_duration_days` | How long to cache TMDB results |
+    | `tmdb.language` | Language code for TMDB responses (e.g. `en-US`) |
+    | `tmdb.cooldown` | Minimum time between TMDB queries for the same title |
+    | `tmdb.match_threshold` | Minimum similarity score to accept a TMDB match |
+  </Accordion>
+
+  <Accordion title="ffprobe sub-section">
+    | Field | Description |
+    |-------|-------------|
+    | `ffprobe.enabled` | Enable FFprobe stream analysis |
+    | `ffprobe.timeout` | Timeout for each FFprobe invocation |
+    | `ffprobe.analyze_duration` | Analysis duration for VOD streams |
+    | `ffprobe.probe_size` | Probe size limit for VOD streams |
+    | `ffprobe.live_analyze_duration` | Analysis duration for live streams |
+    | `ffprobe.live_probe_size` | Probe size limit for live streams |
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+  Duration fields accept `s`, `m`, `h`, `d` suffixes or plain seconds. Size fields accept `B`, `KB`, `MB`, `GB`, `TB` or plain bytes.
+</Note>
+
+```yaml
+metadata_update:
+  cache_path: metadata
+  log:
+    queue_interval: 30s
+    progress_interval: 15s
+  resolve:
+    max_retry_backoff: 1h
+    min_retry_base: 5s
+    max_attempts: 3
+    exhaustion_reset_gap: 1h
+  probe:
+    cooldown: 7d
+    retry_load_retry_delay: 1m
+    retry_backoff_step_1: 10m
+    retry_backoff_step_2: 30m
+    retry_backoff_step_3: 1h
+    max_attempts: 3
+    backoff_jitter_percent: 20
+    user_priority: 127
+```
+
+---
+
+## `schedules`
+
+See the [Scheduled tasks](/configuration/schedules) page for the full reference.
+
+Quick example:
+
+```yaml
+schedules:
+  - schedule: "0  0  8  *  *  *  *"
+    type: PlaylistUpdate
+    targets:
+      - m3u
+  - schedule: "0  0  20  *  *  *  *"
+    type: LibraryScan
+```
+
+---
+
+## `reverse_proxy`
+
+This block controls stream delivery, buffering, caching, header forwarding, rate limiting, and resource retries. See the Streaming and Proxy page for the full reference.
+
+<Note>
+  The `reverse_proxy` block is covered in detail on the **Streaming and Proxy** page under Core Features.
+</Note>
+
+---
+
+## `backup_dir`
+
+Location for configuration backups written from the Web UI.
+
+```yaml
+backup_dir: ./backups
+```
+
+---
+
+## `update_on_boot`
+
+If `true`, Tuliprox starts a playlist update automatically when the application launches.
+
+```yaml
+update_on_boot: true
+```
+
+---
+
+## `log`
+
+| Field | Description |
+|-------|-------------|
+| `sanitize_sensitive_info` | Redact credentials and tokens from log output |
+| `log_active_user` | Include active username in log entries |
+| `log_level` | Log verbosity — plain level or module-specific string |
+
+`log_level` accepts a plain level (`debug`, `info`, `warn`, `error`) or a comma-separated module filter:
+
+```yaml
+log:
+  log_level: hyper_util::client::legacy::connect=error,tuliprox=debug
+```
+
+---
+
+## `web_ui`
+
+| Field | Description |
+|-------|-------------|
+| `enabled` | Show or hide the Web UI |
+| `user_ui_enabled` | Enable the end-user facing UI |
+| `content_security_policy` | Override the default CSP header |
+| `path` | URL path prefix for the Web UI |
+| `player_server` | External player server URL |
+| `kick_secs` | Seconds before an idle Web UI session is kicked |
+| `combine_views_stats_streams` | Merge view, stats, and stream data in the UI |
+| `auth` | JWT authentication for the Web UI |
+
+### `auth` sub-section
+
+| Field | Description |
+|-------|-------------|
+| `enabled` | Enable JWT-based authentication |
+| `issuer` | JWT issuer claim value |
+| `secret` | JWT signing secret |
+| `token_ttl_mins` | Token time-to-live in minutes |
+| `userfile` | Path to the user credentials file |
+
+The `userfile` format is one `username:password_hash` entry per line. Generate password hashes with:
+
+```bash
+tuliprox --genpwd
+```
+
+```yaml
+web_ui:
+  enabled: true
+  user_ui_enabled: true
+  auth:
+    enabled: true
+    issuer: tuliprox
+    secret: "<jwt secret>"
+    userfile: user.txt
+```
+
+---
+
+## Access control and stream fallback
+
+### `user_access_control`
+
+When enabled, Tuliprox evaluates each user's `status`, `exp_date`, and `max_connections` on every stream request.
+
+```yaml
+user_access_control: true
+```
+
+### `connect_timeout_secs`
+
+Defines the connect-phase timeout for provider requests. Set to `0` to disable the timeout.
+
+```yaml
+connect_timeout_secs: 10
+```
+
+### `custom_stream_response_path`
+
+Directory containing fallback transport streams served to clients when a stream cannot be delivered.
+
+| Filename | When served |
+|----------|-------------|
+| `channel_unavailable.ts` | Channel cannot be reached |
+| `user_connections_exhausted.ts` | User has hit their `max_connections` limit |
+| `provider_connections_exhausted.ts` | Provider capacity exhausted |
+| `low_priority_preempted.ts` | Stream preempted by a higher-priority user |
+| `user_account_expired.ts` | User account has passed its `exp_date` |
+| `panel_api_provisioning.ts` | Provider account is being provisioned |
+
+`custom_stream_response_timeout_secs` caps the playback duration of those fallback streams.
+
+```yaml
+custom_stream_response_path: ./fallback_streams
+custom_stream_response_timeout_secs: 30
+```
+
+---
+
+## Other optional sections
+
+<AccordionGroup>
+  <Accordion title="user_config_dir">
+    Storage location for user-specific configuration such as bouquets.
+
+    ```yaml
+    user_config_dir: ./user_config
+    ```
+  </Accordion>
+
+  <Accordion title="hdhomerun">
+    Enables HDHomeRun device emulation for integration with Plex, Jellyfin, Emby, and TVHeadend. Supports multiple virtual devices, optional lineup authentication, and SSDP plus SiliconDust discovery.
+
+    ```yaml
+    hdhomerun:
+      enabled: true
+    ```
+  </Accordion>
+
+  <Accordion title="proxy">
+    Global outgoing proxy for all upstream provider requests. Supported schemes: `http`, `https`, `socks5`.
+
+    ```yaml
+    proxy:
+      url: socks5://proxy.example:1080
+    ```
+  </Accordion>
+
+  <Accordion title="ipcheck">
+    Defines endpoints and optional regexes for public IP detection.
+
+    | Field | Description |
+    |-------|-------------|
+    | `url` | Generic IP check endpoint |
+    | `url_ipv4` | IPv4-specific endpoint |
+    | `url_ipv6` | IPv6-specific endpoint |
+    | `pattern_ipv4` | Regex to extract IPv4 address from response |
+    | `pattern_ipv6` | Regex to extract IPv6 address from response |
+
+    ```yaml
+    ipcheck:
+      url_ipv4: https://api4.ipify.org
+      url_ipv6: https://api6.ipify.org
+    ```
+  </Accordion>
+
+  <Accordion title="config_hot_reload">
+    When enabled, Tuliprox watches mapping files and `api-proxy.yml` and reloads them automatically when changes are detected — no restart required.
+
+    ```yaml
+    config_hot_reload: true
+    ```
+  </Accordion>
+
+  <Accordion title="library">
+    Enables local media library integration with recursive directory scanning, movie vs. series classification, NFO reading and writing, TMDB enrichment, incremental scans, and stable virtual IDs.
+
+    | Field | Description |
+    |-------|-------------|
+    | `enabled` | Enable the library |
+    | `scan_directories` | List of directories to scan |
+    | `scan_directories[].enabled` | Enable this scan directory |
+    | `scan_directories[].path` | Absolute path to scan |
+    | `scan_directories[].content_type` | `auto`, `movie`, or `series` |
+    | `scan_directories[].recursive` | Scan subdirectories |
+    | `supported_extensions` | File extensions to index |
+
+    ```yaml
+    library:
+      enabled: true
+      scan_directories:
+        - enabled: true
+          path: "/projects/media"
+          content_type: auto
+          recursive: true
+      supported_extensions: ["mp4", "mkv", "avi", "mov", "ts", "m4v", "webm"]
+    ```
+  </Accordion>
+</AccordionGroup>

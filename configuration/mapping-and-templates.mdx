@@ -1,0 +1,336 @@
+---
+title: "Mapping and templates"
+description: "Reusable regex templates and the mapper DSL for renaming, regrouping, and enriching playlist content."
+---
+
+Tuliprox supports two layers of editorial logic:
+
+- **Reusable templates** — named regex fragments referenced with `!name!` syntax
+- **Mapping rules** — a small DSL for renaming, regrouping, and enriching content
+
+---
+
+## Template loading
+
+Templates can live in three places:
+
+| Location | How to configure |
+|----------|------------------|
+| Inline in `source.yml` | `templates:` block at the top level |
+| Inline in `mapping.yml` | `templates:` block inside `mappings:` |
+| Central file or directory | `template_path` in `config.yml` |
+
+If a directory is used, all `*.yml` files are loaded in alphanumeric order and merged. Template names must be globally unique across all sources.
+
+### Template syntax
+
+Define templates as named string values:
+
+```yaml
+templates:
+  - name: delimiter
+    value: '[\s_-]*'
+  - name: quality
+    value: '(?i)(?P<quality>HD|LQ|4K|UHD)?'
+```
+
+Reference a template by wrapping its name in `!` characters:
+
+```text
+^.*TF1!delimiter!Series?!delimiter!Films?(!delimiter!!quality!)\s*$
+```
+
+Templates can reference other templates in their `value`.
+
+---
+
+## `mapping.yml` structure
+
+The top-level `mappings` key holds:
+
+| Key | Description |
+|-----|-------------|
+| `templates` | Reusable template definitions (same format as `source.yml`) |
+| `mapping` | List of mapping entries |
+
+Each mapping entry defines:
+
+| Field | Description |
+|-------|-------------|
+| `id` | Unique identifier — referenced from targets in `source.yml` |
+| `match_as_ascii` | Normalize Unicode to ASCII before matching |
+| `mapper` | List of mapper rules (filter + script pairs) |
+| `counter` | List of counter rules for injecting sequence numbers |
+
+---
+
+## `match_as_ascii`
+
+When enabled, Tuliprox deunicodes field values before applying filters. This lets simple ASCII patterns match content with accented or special characters:
+
+- `é` → `e`
+- `ö` → `o`
+- `ß` → `ss`
+
+```yaml
+mapping:
+  - id: my_mapping
+    match_as_ascii: true
+    mapper: ...
+```
+
+---
+
+## Mapper rules
+
+Each mapper rule contains:
+
+| Field | Description |
+|-------|-------------|
+| `filter` | Filter expression — only matching entries run this script |
+| `script` | DSL script to execute |
+
+```yaml
+mapper:
+  - filter: 'Group ~ "(?i)news"'
+    script: |
+      add_favourite("Favourites")
+```
+
+---
+
+## Mapper DSL reference
+
+### Accessing playlist fields
+
+Playlist fields are accessed with the `@Field` syntax. Fields can also be assigned to update the output:
+
+| Variable | Description |
+|----------|-------------|
+| `@Group` | Channel group name |
+| `@Title` | Channel title |
+| `@Name` | Channel name |
+| `@Caption` | Channel caption |
+| `@Url` | Stream URL |
+| `@Genre` | Content genre |
+| `@Input` | Source input name |
+
+### Variable assignment
+
+```dsl
+quality = @Caption ~ "\\b([F]?HD[i]?)\\b"
+```
+
+### Regex capture
+
+Regex matches expose numbered captures via `.1`, `.2`, etc., and named captures via `.name`:
+
+```dsl
+title_match = @Caption ~ "(.*?)\\:\\s*(.*)"
+title_prefix = title_match.1
+title_name = title_match.2
+```
+
+### `match` block
+
+Select a value based on which variables are truthy:
+
+```dsl
+result = match {
+  (var1, var2) => result1,
+  var2 => result2,
+  _ => default
+}
+```
+
+### `map` block
+
+Map a variable's value to a new value:
+
+```dsl
+quality = map quality {
+  "720p" => "HD",
+  "1080p" => "FHD",
+  "4K" => "UHD",
+  _ => quality,
+}
+```
+
+Range syntax is supported for numeric mapping:
+
+```dsl
+year_group = map year {
+  ..2019 => "< 2020",
+  _ => year_text,
+}
+```
+
+### `for_each`
+
+Iterate over split values or regex capture groups:
+
+```dsl
+genres = split(@Genre, "[,/&]")
+genres.for_each((_, genre) => {
+  add_favourite(concat("Genre - ", genre))
+})
+```
+
+### Nested `map` blocks
+
+`map` blocks can be nested:
+
+```dsl
+prefix = map quality {
+  "HD" => "01.",
+  "FHD" => "02.",
+  _ => map group {
+    "NEWS" => "04.",
+    "DOCU" => "05.",
+    _ => group
+  },
+}
+```
+
+---
+
+## Built-in functions
+
+| Function | Description |
+|----------|-------------|
+| `concat(a, b, ...)` | Concatenate strings |
+| `uppercase(s)` | Convert to uppercase |
+| `lowercase(s)` | Convert to lowercase |
+| `capitalize(s)` | Capitalize first letter |
+| `trim(s)` | Remove leading and trailing whitespace |
+| `print(s)` | Print a value to debug output |
+| `number(s)` | Parse a string as a number |
+| `first(a, b, ...)` | Return the first non-null value |
+| `template(name)` | Expand a named template |
+| `replace(s, pattern, replacement)` | Regex replace |
+| `pad(n, width)` | Zero-pad a number |
+| `format(fmt, ...)` | Format string with positional args |
+| `add_favourite(group)` | Add the current channel to a favourite group |
+| `split(s, pattern)` | Split a string on a regex pattern |
+
+---
+
+## Counters
+
+Counters inject auto-incrementing sequence numbers into channel titles or group names.
+
+| Field | Description |
+|-------|-------------|
+| `filter` | Filter expression — only matching entries get a counter |
+| `value` | Starting counter value |
+| `field` | Field to apply the counter to: `title`, `group`, etc. |
+| `modifier` | `prefix` or `suffix` |
+| `concat` | Separator string between counter and field value |
+| `padding` | Minimum digit width (zero-padded) |
+
+```yaml
+mapping:
+  - id: simple
+    counter:
+      - filter: 'Group ~ ".*FR.*"'
+        value: 9000
+        field: title
+        padding: 2
+        modifier: suffix
+        concat: " - "
+```
+
+---
+
+## Complete `mapping.yml` example
+
+```yaml
+mappings:
+  templates:
+    - name: QUALITY
+      value: '(?i)\b([FUSL]?HD|SD|4K|1080p|720p|3840p)\b'
+  mapping:
+    - id: all_channels
+      match_as_ascii: true
+      mapper:
+        - filter: 'Caption ~ "(?i)^(US|USA|United States).*?TNT"'
+          script: |
+            quality = uppercase(@Caption ~ "!QUALITY!")
+            quality = map quality {
+              "720p" => "HD",
+              "1080p" => "FHD",
+              "4K" => "UHD",
+              "3840p" => "UHD",
+              _ => quality,
+            }
+            @Group = "United States - Entertainment"
+```
+
+---
+
+## Advanced grouping example
+
+This script groups channels into quality-oriented or category-oriented buckets:
+
+```dsl
+group = @Group ~ "(EU|SATELLITE|NATIONAL|NEWS|MUSIC|SPORT|RELIGION|FILM|KIDS|DOCU)"
+quality = @Caption ~ "\\b([F]?HD[i]?)\\b"
+title_match = @Caption ~ "(.*?)\\:\\s*(.*)"
+title_name = title_match.2
+
+quality = map group {
+  "NEWS" | "NATIONAL" | "SATELLITE" => quality,
+  _ => null,
+}
+
+prefix = map quality {
+  "HD" => "01.",
+  "FHD" => "02.",
+  "HDi" => "03.",
+  _ => map group {
+    "NEWS" => "04.",
+    "DOCU" => "05.",
+    "SPORT" => "06.",
+    _ => group
+  },
+}
+
+name = match {
+  quality => concat(prefix, " FR [", quality, "]"),
+  group => concat(prefix, " FR [", group, "]"),
+  _ => prefix
+}
+
+@Group = name
+@Caption = title_name
+```
+
+## Grouping by release year
+
+```dsl
+year_text = @Caption ~ "(\\d{4})\\)?$"
+year = number(year_text)
+year_group = map year {
+  ..2019 => "< 2020",
+  _ => year_text,
+}
+@Group = concat("FR | MOVIES ", year_group)
+```
+
+---
+
+## Filter hints
+
+Filters in mapper rules use the same expression language as target filters:
+
+| Operator | Description |
+|----------|-------------|
+| `~` | Regex match |
+| `NOT` | Logical negation |
+| `AND` | Logical conjunction |
+| `OR` | Logical disjunction |
+| `Type = live\|vod\|series` | Match by content type |
+
+<Tip>
+  Use [regex101.com](https://regex101.com) with the **Rust** flavor selected to test your regex patterns before adding them to mapping scripts.
+</Tip>

@@ -1,0 +1,214 @@
+---
+title: "Playlist processing"
+description: "Filter, rename, map, sort, and merge playlists from multiple providers into clean, curated outputs."
+---
+
+tuliprox applies a pipeline of processing steps to every playlist it ingests. You control which steps run and in what order through the target configuration in `source.yml`.
+
+## Processing pipeline
+
+<Steps>
+  <Step title="Ingest inputs">
+    tuliprox fetches one or more playlists from your configured inputs (M3U, Xtream, or local library).
+  </Step>
+  <Step title="Filter">
+    Channels and groups that do not match your filter expression are removed.
+  </Step>
+  <Step title="Rename">
+    Regex-based rename rules rewrite group names, channel titles, or other fields.
+  </Step>
+  <Step title="Map">
+    Mapping scripts apply rich transformations: variable assignments, regex captures, match/map blocks, and builtin functions.
+  </Step>
+  <Step title="Sort">
+    Sort rules reorder groups and channels by field value or an explicit sequence.
+  </Step>
+  <Step title="Publish">
+    tuliprox writes the result to one or more output targets: M3U, Xtream, HDHomeRun, or STRM.
+  </Step>
+</Steps>
+
+You can change the order of Filter, Rename, and Map with the `processing_order` field. Valid values are `frm`, `fmr`, `rfm`, `rmf`, `mfr`, and `mrf`.
+
+## Filtering
+
+Filters use a boolean expression DSL. Fields you can match on are `Group`, `Title`, `Name`, `Caption`, `Url`, `Genre`, `Input`, and `Type`.
+
+| Operator | Meaning |
+|---|---|
+| `~` | Regex match |
+| `==` | Exact string equality |
+| `AND` | Both conditions must be true |
+| `OR` | Either condition must be true |
+| `NOT` | Negates the following condition |
+
+Example — keep only French channels, excluding adult and series content:
+
+```text
+(Group ~ "^FR.*") AND NOT (Group ~ ".*XXX.*" OR Group ~ ".*SERIES.*")
+```
+
+Example — keep German channels that are not shopping, or any Australian channel:
+
+```text
+((Group ~ "^DE.*") AND (NOT Title ~ ".*Shopping.*")) OR (Group ~ "^AU.*")
+```
+
+You can also filter by content type:
+
+```text
+Type = live
+```
+
+Valid `Type` values are `live`, `vod`, and `series`.
+
+<Tip>
+  Use [regex101.com](https://regex101.com) with the Rust flavor selected to test your regex patterns before adding them to your configuration.
+</Tip>
+
+## Renaming
+
+Rename rules match a field with a regex and replace it with a new name. Capture groups from the pattern are available as `$1`, `$2`, etc.
+
+```yaml
+rename:
+  - field: group
+    pattern: '^DE(.*)'
+    new_name: '1. DE$1'
+```
+
+Supported `field` values are `group`, `title`, `name`, `caption`, and `url`.
+
+## Sorting
+
+Sort rules control the order of groups and channels in the output. You can sort alphabetically or pin specific items to the top using a `sequence` list:
+
+```yaml
+sort:
+  rules:
+    - target: group
+      order: asc
+      filter: Group ~ ".*"
+      field: group
+      sequence:
+        - '^Freetv'
+        - '^Shopping'
+        - '^Entertainment'
+```
+
+Items matching the `sequence` entries (in order) appear first; remaining items follow in `asc` or `desc` order.
+
+## Merging multiple sources
+
+A single `source` block can reference multiple inputs. tuliprox fetches all of them and merges the results before applying filters and mappings:
+
+```yaml
+sources:
+  - inputs:
+      - provider_a
+      - provider_b
+      - local_library
+    targets:
+      - name: combined
+        output:
+          - type: m3u
+          - type: xtream
+        filter: "!ALL_CHAN!"
+```
+
+This lets you combine a live IPTV provider, a VOD provider, and your local media into a single unified playlist.
+
+## Templates
+
+Templates let you define reusable regex fragments and reference them with `!name!` syntax. This keeps complex patterns readable and DRY.
+
+Define templates in `source.yml`, `mapping.yml`, or a central file configured via `template_path`:
+
+```yaml
+templates:
+  - name: delimiter
+    value: '[\s_-]*'
+  - name: quality
+    value: '(?i)(?P<quality>HD|LQ|4K|UHD)?'
+```
+
+Reference them in filters or mapping scripts:
+
+```text
+^.*TF1!delimiter!Series?!delimiter!Films?(!delimiter!!quality!)\s*$
+```
+
+Templates can reference other templates. Template names must be globally unique across all loaded files.
+
+<Note>
+  You can also define a shorthand template for a frequently used filter expression and reference it directly as the target `filter` value. For example: `filter: "!ALL_CHAN!"`
+</Note>
+
+## Output types
+
+<Tabs>
+  <Tab title="M3U">
+    Produces a standard M3U playlist. Compatible with VLC, Kodi, Jellyfin, and most IPTV players.
+
+    ```yaml
+    output:
+      - type: m3u
+        filename: my_playlist.m3u
+        mask_redirect_url: false
+    ```
+  </Tab>
+  <Tab title="Xtream">
+    Exposes an Xtream Codes-compatible panel API. Use this for players that expect a server URL, username, and password.
+
+    ```yaml
+    output:
+      - type: xtream
+        skip_live_direct_source: false
+        skip_video_direct_source: false
+        skip_series_direct_source: false
+    ```
+  </Tab>
+  <Tab title="HDHomeRun">
+    Emulates an HDHomeRun tuner device for Plex, Jellyfin, Emby, and TVHeadend discovery.
+
+    ```yaml
+    output:
+      - type: hdhomerun
+        device: my_tuner
+        username: user
+    ```
+  </Tab>
+  <Tab title="STRM">
+    Writes `.strm` stub files to a directory. Useful for media-server-oriented workflows where you want each channel to appear as a file.
+
+    ```yaml
+    output:
+      - type: strm
+        directory: /media/strm
+        underscore_whitespace: true
+        cleanup: true
+        flat: false
+    ```
+  </Tab>
+</Tabs>
+
+## Favourites
+
+After mapping, you can define explicit favourite groups that collect channels matching a filter across all providers:
+
+```yaml
+favourites:
+  - cluster: series
+    group: "My Favourites"
+    filter: 'Name ~ "Cinema"'
+    match_as_ascii: true
+```
+
+## Duplicate removal
+
+Set `remove_duplicates: true` in the target `options` to automatically deduplicate channels with identical URLs:
+
+```yaml
+options:
+  remove_duplicates: true
+```

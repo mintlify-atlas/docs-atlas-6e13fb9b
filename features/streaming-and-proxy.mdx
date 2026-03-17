@@ -1,0 +1,240 @@
+---
+title: "Streaming and proxy"
+description: "Reverse-proxy live streams with connection management, session reservation, priority-based preemption, and custom fallback videos."
+---
+
+tuliprox is not only a playlist transformer — its runtime streaming engine is a core part of the project. When a client requests a stream, tuliprox can either redirect the client directly to the provider URL or proxy all traffic through itself.
+
+## Reverse proxy vs redirect
+
+| Mode | How it works | When to use |
+|---|---|---|
+| **Redirect** | tuliprox returns a `302` pointing to the provider URL. The client connects directly. | Simple setups where you don't need connection control. |
+| **Reverse proxy** | tuliprox opens the upstream connection and forwards bytes to the client. | When you need connection limits, fallback videos, stream sharing, or priority enforcement. |
+
+Reverse proxy mode gives tuliprox full control over:
+
+- user and provider connection limits
+- custom fallback responses for failure cases
+- HLS and catchup session handling
+- live stream sharing across users
+- priority-based preemption
+
+To force redirect mode for a specific target even when a reverse proxy is configured, set `force_redirect: true` in the target `options`.
+
+## Stream configuration
+
+The `reverse_proxy.stream` block controls the runtime behaviour of proxied streams:
+
+```yaml
+reverse_proxy:
+  stream:
+    retry: true
+    buffer:
+      enabled: true
+      size: 1024
+    throttle: "8 MB/s"
+    grace_period_millis: 2000
+    grace_period_timeout_secs: 5
+    grace_period_hold_stream: false
+    shared_burst_buffer_mb: 8
+    hls_session_ttl_secs: 30
+    catchup_session_ttl_secs: 60
+```
+
+### `retry`
+
+When `true`, tuliprox automatically reconnects to the provider if the upstream disconnects unexpectedly. This keeps clients playing through transient provider blips without any action on the client side.
+
+### Buffer
+
+The buffer holds a rolling window of stream data in memory:
+
+| Field | Description |
+|---|---|
+| `buffer.enabled` | Enable or disable the in-memory buffer |
+| `buffer.size` | Number of 8 192-byte chunks to buffer. `1024` ≈ 8 MB |
+
+When `share_live_streams` is enabled, each shared channel keeps at least `shared_burst_buffer_mb` of data in memory so that new viewers can join mid-stream without missing content.
+
+### Throttle
+
+Limit the bandwidth tuliprox uses per stream. Supported units:
+
+```
+KB/s  MB/s  KiB/s  MiB/s  kbps  mbps  Mibps
+```
+
+Example:
+
+```yaml
+throttle: "4 MB/s"
+```
+
+### Rate limiting
+
+Per-IP rate limiting is available under `reverse_proxy.rate_limit`:
+
+```yaml
+reverse_proxy:
+  rate_limit:
+    enabled: true
+    period_millis: 1000
+    burst_size: 5
+```
+
+## Grace period (VLC seeks)
+
+VLC and some other players produce rapid reconnects during seeks. If the previous upstream connection has not fully closed yet, the provider may still count it against its max-connections limit, causing a false "connections exhausted" error.
+
+The grace period gives stale connections time to disappear before tuliprox re-evaluates the limit:
+
+```yaml
+reverse_proxy:
+  stream:
+    grace_period_millis: 2000
+    grace_period_timeout_secs: 5
+```
+
+| Field | Description |
+|---|---|
+| `grace_period_millis` | How long to wait before checking whether a stale connection has closed |
+| `grace_period_timeout_secs` | Hard limit on how long to wait for the stale connection to disappear |
+| `grace_period_hold_stream` | When `true`, tuliprox waits for the grace decision before it starts forwarding media data |
+
+## HLS and catchup session reservation
+
+HLS and catchup clients repeatedly connect, fetch a playlist or segment, disconnect, and reconnect. Holding a real provider slot open the entire time wastes provider connections.
+
+tuliprox instead keeps a short-lived **account reservation** between requests:
+
+- the real provider slot is held only during the active request
+- between requests, tuliprox keeps only an account reservation for the session TTL
+- the same client/session reuses the same provider account on reconnect
+- a channel switch from the same client can take over the reservation immediately
+
+```yaml
+reverse_proxy:
+  stream:
+    hls_session_ttl_secs: 30
+    catchup_session_ttl_secs: 60
+```
+
+<Note>
+  Normal TS streaming does **not** use the reservation model. Only HLS and catchup use session TTLs.
+</Note>
+
+## Shared live streams
+
+When `share_live_streams` is enabled on a target, multiple users watching the same channel share a single upstream provider connection instead of each opening their own:
+
+```yaml
+options:
+  share_live_streams: true
+```
+
+Sharing reduces provider pressure significantly for popular channels. The stream priority model applies at the shared-stream level:
+
+- the first viewer starts the shared stream immediately
+- additional viewers on the same channel join the existing shared stream
+- the effective priority of the shared stream equals the highest priority of its active viewers
+- when a viewer leaves, priority is recalculated
+- if a higher-priority user requests a new stream and provider capacity is full, a lower-priority shared stream can be preempted
+- equal priority never preempts a running stream
+
+## Priority and preemption
+
+tuliprox uses a nice-style priority scale across users and internal tasks:
+
+- **lower number = higher priority**
+- negative values are allowed
+- equal priority does **not** preempt a running stream
+
+When provider capacity is exhausted, a higher-priority user requesting a stream can displace a lower-priority running stream. The displaced stream is terminated immediately, releasing the provider slot.
+
+Internal probe tasks run at the priority set in `metadata_update.probe.user_priority` (default `127`, the lowest end of the scale). This ensures user playback always wins over background metadata work:
+
+```yaml
+metadata_update:
+  probe:
+    user_priority: 127
+```
+
+## Custom fallback videos
+
+When tuliprox cannot serve the real stream, it can return a pre-recorded fallback transport stream instead of an error. This makes failure modes visible and friendly for downstream clients.
+
+Place `.ts` files in the directory configured by `custom_stream_response_path`. tuliprox discovers them by filename:
+
+| Filename | Trigger |
+|---|---|
+| `channel_unavailable.ts` | The requested channel is not available |
+| `user_connections_exhausted.ts` | The user has reached their connection limit |
+| `provider_connections_exhausted.ts` | All provider slots are in use |
+| `low_priority_preempted.ts` | This stream was displaced by a higher-priority request |
+| `user_account_expired.ts` | The user's account has expired |
+| `panel_api_provisioning.ts` | A panel API account is still being provisioned |
+
+```yaml
+custom_stream_response_path: ./fallback
+custom_stream_response_timeout_secs: 30
+```
+
+Set `custom_stream_response_timeout_secs` to cap playback of fallback content so clients retry after a fixed delay.
+
+## Other reverse proxy settings
+
+<Accordion title="Cache">
+  tuliprox maintains an LRU cache for proxied resources such as channel logos. If `resource_rewrite_disabled` is `true`, the cache is effectively disabled because tuliprox can no longer track rewritten resource URLs.
+
+  ```yaml
+  reverse_proxy:
+    cache:
+      size: 500
+  ```
+</Accordion>
+
+<Accordion title="Header stripping">
+  Use `disabled_header` to strip request headers before forwarding to providers:
+
+  ```yaml
+  reverse_proxy:
+    disabled_header:
+      referer_header: true
+      x_header: false
+      cloudflare_header: false
+      custom_header: []
+  ```
+</Accordion>
+
+<Accordion title="Resource retries">
+  Control retries for proxied upstream resources such as logos and EPG images:
+
+  ```yaml
+  reverse_proxy:
+    resource_retry:
+      max_attempts: 3
+      backoff_millis: 500
+      backoff_multiplier: 2
+  ```
+</Accordion>
+
+<Accordion title="GeoIP">
+  Optional country lookup from a CSV IP-range file. When configured, tuliprox can expose country information for connected clients.
+
+  ```yaml
+  reverse_proxy:
+    geoip:
+      enabled: true
+      path: ./geoip.csv
+  ```
+</Accordion>
+
+<Accordion title="Rewrite secret">
+  Set an explicit secret for generating and validating rewritten resource URLs. Without this, a server restart regenerates the secret and invalidates any previously rewritten URLs stored in client caches.
+
+  ```yaml
+  reverse_proxy:
+    rewrite_secret: "your-persistent-secret"
+  ```
+</Accordion>

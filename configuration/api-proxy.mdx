@@ -1,0 +1,278 @@
+---
+title: "API proxy (api-proxy.yml)"
+description: "Configure the public server URLs Tuliprox advertises and the user credentials that control access to each target."
+---
+
+`api-proxy.yml` tells Tuliprox which server URLs to advertise to clients and which users may access which targets.
+
+## Top-level entries
+
+| Entry | Description |
+|-------|-------------|
+| `server` | Named server definitions (URL, protocol, timezone) |
+| `user` | User credential definitions per target |
+| `use_user_db` | Store users in the database instead of this file |
+| `auth_error_status` | HTTP status code returned on authentication failure |
+
+---
+
+## `server`
+
+You can define multiple named servers — typically one for local network access and one for external access. One server should always be named `default`.
+
+### Server fields
+
+| Field | Description |
+|-------|-------------|
+| `name` | Unique server name (`default` is required) |
+| `protocol` | `http` or `https` |
+| `host` | Hostname or IP address Tuliprox advertises |
+| `port` | Port number (as a string) |
+| `timezone` | IANA timezone name for EPG time shifting (e.g. `Europe/Paris`) |
+| `message` | Welcome message returned in Xtream API info responses |
+| `path` | URL path prefix — useful when behind a reverse proxy |
+
+<Note>
+  If Tuliprox is behind another reverse proxy, use `path` to simplify URL rewriting without extra proxy rewrites.
+</Note>
+
+```yaml
+server:
+  - name: default
+    protocol: http
+    host: 192.168.1.9
+    port: "8901"
+    timezone: Europe/Paris
+    message: Welcome to tuliprox
+  - name: external
+    protocol: https
+    host: tv.example.com
+    port: "443"
+    timezone: Europe/Paris
+    message: Welcome to tuliprox
+    path: tuliprox
+```
+
+---
+
+## `user`
+
+Users are defined per target. Each target can expose multiple sets of credentials.
+
+### Credential fields
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `username` | string | **Required.** Username for authentication |
+| `password` | string | **Required.** Password for authentication |
+| `token` | string | Optional unique token (alternative to username/password) |
+| `proxy` | string | Stream proxy mode — see [Proxy mode](#proxy-mode) |
+| `server` | string | Which server definition to use for URL generation |
+| `epg_timeshift` | int | EPG time offset in hours |
+| `max_connections` | int | Maximum simultaneous streams for this user |
+| `status` | string | Account status — evaluated when `user_access_control` is enabled |
+| `exp_date` | int | Unix timestamp of account expiry |
+| `priority` | int | Stream priority (lower = higher priority, negatives allowed) |
+| `user_ui_enabled` | bool | Enable Web UI access for this user |
+| `user_access_control` | bool | Override the global access control setting for this user |
+
+<Note>
+  `username` and `password` are mandatory. `token` is optional but must be globally unique if set.
+</Note>
+
+```yaml
+user:
+  - target: xc_m3u
+    credentials:
+      - username: demo
+        password: secret1
+        token: token1
+        proxy: reverse
+        server: default
+        exp_date: 1672705545
+        max_connections: 1
+        status: Active
+        priority: 0
+```
+
+---
+
+## Proxy mode
+
+The `proxy` field controls how Tuliprox delivers streams to this user.
+
+| Value | Description |
+|-------|-------------|
+| `redirect` | Tuliprox returns the provider URL directly — client connects to provider |
+| `reverse` | Tuliprox proxies all stream traffic itself |
+| `reverse[live]` | Reverse proxy only for live streams |
+| `reverse[live,vod]` | Reverse proxy for live and VOD, redirect for series |
+
+<Tip>
+  Use `redirect` when clients can reach the provider directly and you want to reduce load on Tuliprox. Use `reverse` when you need buffering, caching, or connection tracking.
+</Tip>
+
+---
+
+## Priority
+
+User priority is optional and defaults to `0`.
+
+| Rule | Description |
+|------|-------------|
+| Lower number = higher priority | `priority: -10` outranks `priority: 0` |
+| Negative values are allowed | Use negatives for VIP users |
+| Preemption on exhaustion | Higher-priority users can take a stream slot from lower-priority active streams when the provider is at capacity |
+| Equal priority | A user with the same priority does not preempt a currently running stream |
+| `max_connections` is independent | Connection limits apply regardless of priority |
+
+<Note>
+  Probe tasks use the same priority scale via `metadata_update.probe.user_priority` in `config.yml`.
+</Note>
+
+---
+
+## `use_user_db`
+
+When set to `true`, users are stored in the Tuliprox database instead of this YAML file. Use the Web UI to add, edit, or remove users.
+
+```yaml
+use_user_db: true
+```
+
+Tuliprox migrates users automatically when you switch between YAML and database mode.
+
+---
+
+## `auth_error_status`
+
+HTTP status code returned when authentication fails (invalid or missing credentials). Defaults to `403`.
+
+```yaml
+auth_error_status: 403
+```
+
+<Note>
+  This setting applies to streaming and playlist API endpoints (`player_api.php`, `get.php`, `xmltv.php`, stream paths, resource paths). It does **not** affect the Web UI / REST API (`/api/v1/…`) or HDHomeRun endpoints, which always use their own fixed status codes.
+</Note>
+
+---
+
+## Access URLs
+
+<Tabs>
+  <Tab title="Xtream">
+    ```text
+    http://host:port/player_api.php?username=USER&password=PASS
+    http://host:port/player_api.php?token=TOKEN
+    ```
+
+    REST-friendly alias:
+    ```text
+    http://host:port/xtream?username=USER&password=PASS
+    ```
+  </Tab>
+  <Tab title="M3U">
+    ```text
+    http://host:port/get.php?username=USER&password=PASS
+    http://host:port/get.php?token=TOKEN
+    ```
+
+    REST-friendly alias:
+    ```text
+    http://host:port/m3u?username=USER&password=PASS
+    ```
+  </Tab>
+  <Tab title="XMLTV">
+    ```text
+    http://host:port/xmltv.php?username=USER&password=PASS
+    ```
+
+    REST-friendly alias:
+    ```text
+    http://host:port/epg?username=USER&password=PASS
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Reverse proxy in front of Tuliprox
+
+If another proxy sits in front of Tuliprox, configure it to forward the original client IP.
+
+<Tabs>
+  <Tab title="nginx">
+    ```nginx
+    location /tuliprox {
+      rewrite ^/tuliprox/(.*)$ /$1 break;
+      proxy_set_header X-Real-IP $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_pass http://192.168.1.9:8901/;
+      proxy_redirect off;
+      proxy_buffering off;
+      proxy_request_buffering off;
+      proxy_cache off;
+      tcp_nopush on;
+      tcp_nodelay on;
+    }
+    ```
+  </Tab>
+  <Tab title="Traefik">
+    ```yaml
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.tuliprox.rule=Host(`tv.my-domain.io`) && (PathPrefix(`/tv`) || PathPrefix(`/tuliprox`))"
+      - "traefik.http.middlewares.tuliprox-strip.stripprefix.prefixes=/tv"
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+  Make sure your reverse proxy forwards `X-Real-IP` and `X-Forwarded-For` headers. Without these, Tuliprox cannot track per-client connections accurately.
+</Warning>
+
+---
+
+## Multiple server example
+
+This pattern exposes Tuliprox on the local network and externally via HTTPS with different base URLs:
+
+```yaml
+server:
+  - name: default
+    protocol: http
+    host: 192.168.1.9
+    port: "8901"
+    timezone: Europe/Paris
+    message: Welcome to tuliprox
+  - name: external
+    protocol: https
+    host: tv.example.com
+    port: "443"
+    timezone: Europe/Paris
+    message: Welcome to tuliprox
+    path: tuliprox
+
+user:
+  - target: xc_m3u
+    credentials:
+      - username: alice
+        password: alicepass
+        proxy: reverse
+        server: default
+        max_connections: 2
+        priority: 0
+      - username: bob
+        password: bobpass
+        proxy: reverse
+        server: external
+        max_connections: 1
+        priority: 0
+```
+
+---
+
+## User bouquets
+
+Tuliprox supports per-user bouquets — curated channel lists that are stored in the user config directory (`user_config_dir` in `config.yml`). Bouquets are managed through the Web UI and are tied to a user's `target` assignment. They allow users to create personal filtered views without modifying the shared target configuration.

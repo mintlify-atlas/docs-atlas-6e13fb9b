@@ -1,0 +1,340 @@
+---
+title: "Xtream Codes API"
+description: "Full Xtream Codes-compatible API for media players. Supports player_api.php, stream URLs, catchup/timeshift, and short EPG."
+---
+
+tuliprox exposes a complete Xtream Codes-compatible API. Any player that works with an Xtream Codes provider (e.g., Tivimate, IPTV Smarters, OTT Navigator) can connect to tuliprox directly.
+
+## Player API endpoint
+
+All three paths are equivalent:
+
+| Method | Path |
+|---|---|
+| `GET` / `POST` | `/player_api.php` |
+| `GET` / `POST` | `/panel_api.php` |
+| `GET` / `POST` | `/xtream` |
+
+### Authentication parameters
+
+<ParamField query="username" type="string">
+  Username from `api-proxy.yml`. Required unless `token` is used.
+</ParamField>
+
+<ParamField query="password" type="string">
+  Password for the user. Required unless `token` is used.
+</ParamField>
+
+<ParamField query="token" type="string">
+  Token credential. Accepted in place of `username` + `password`.
+</ParamField>
+
+<ParamField query="action" type="string">
+  The API action to perform. Omit or leave empty to retrieve account info.
+</ParamField>
+
+---
+
+## Actions
+
+### Account info
+
+Omit `action` or set `action=get_account_info`. Returns user credentials, server info, and active connection count.
+
+```bash
+curl "http://localhost:8901/player_api.php?username=alice&password=s3cr3t"
+```
+
+<Expandable title="Response fields">
+  <ResponseField name="user_info" type="object">
+    <Expandable title="fields">
+      <ResponseField name="username" type="string">The authenticated username.</ResponseField>
+      <ResponseField name="password" type="string">The authenticated password.</ResponseField>
+      <ResponseField name="message" type="string">Welcome message from server config.</ResponseField>
+      <ResponseField name="auth" type="number">Authentication status: `1` = authenticated.</ResponseField>
+      <ResponseField name="status" type="string">Account status (e.g., `Active`).</ResponseField>
+      <ResponseField name="exp_date" type="string">Unix timestamp of account expiry.</ResponseField>
+      <ResponseField name="is_trial" type="string">`0` or `1`.</ResponseField>
+      <ResponseField name="active_cons" type="string">Number of currently active connections.</ResponseField>
+      <ResponseField name="created_at" type="string">Account creation timestamp.</ResponseField>
+      <ResponseField name="max_connections" type="string">Connection limit for this user.</ResponseField>
+    </Expandable>
+  </ResponseField>
+  <ResponseField name="server_info" type="object">
+    <Expandable title="fields">
+      <ResponseField name="url" type="string">Server base URL.</ResponseField>
+      <ResponseField name="port" type="string">Server port.</ResponseField>
+      <ResponseField name="https_port" type="string">HTTPS port if applicable.</ResponseField>
+      <ResponseField name="server_protocol" type="string">`http` or `https`.</ResponseField>
+      <ResponseField name="rtmp_port" type="string">RTMP port (not used by tuliprox).</ResponseField>
+      <ResponseField name="timezone" type="string">Server timezone string.</ResponseField>
+      <ResponseField name="timestamp_now" type="number">Current server Unix timestamp.</ResponseField>
+      <ResponseField name="time_now" type="string">Current server time as string.</ResponseField>
+    </Expandable>
+  </ResponseField>
+</Expandable>
+
+---
+
+### Live categories
+
+```
+action=get_live_categories
+```
+
+```bash
+curl "http://localhost:8901/player_api.php?username=alice&password=s3cr3t&action=get_live_categories"
+```
+
+Returns a JSON array of category objects.
+
+<Expandable title="Category object fields">
+  <ResponseField name="category_id" type="string">Unique category identifier.</ResponseField>
+  <ResponseField name="category_name" type="string">Human-readable category name.</ResponseField>
+  <ResponseField name="parent_id" type="number">Parent category ID, `0` for top-level.</ResponseField>
+</Expandable>
+
+---
+
+### VOD categories
+
+```
+action=get_vod_categories
+```
+
+---
+
+### Series categories
+
+```
+action=get_series_categories
+```
+
+---
+
+### Live streams
+
+```
+action=get_live_streams
+```
+
+<ParamField query="category_id" type="string">
+  Optional. Filter streams to a specific category.
+</ParamField>
+
+```bash
+curl "http://localhost:8901/player_api.php?username=alice&password=s3cr3t&action=get_live_streams&category_id=1"
+```
+
+---
+
+### VOD streams
+
+```
+action=get_vod_streams
+```
+
+<ParamField query="category_id" type="string">
+  Optional. Filter by category.
+</ParamField>
+
+---
+
+### Series
+
+```
+action=get_series
+```
+
+<ParamField query="category_id" type="string">
+  Optional. Filter by category.
+</ParamField>
+
+---
+
+### VOD info
+
+```
+action=get_vod_info
+```
+
+<ParamField query="vod_id" type="string" required>
+  The virtual stream ID of the VOD item.
+</ParamField>
+
+```bash
+curl "http://localhost:8901/player_api.php?username=alice&password=s3cr3t&action=get_vod_info&vod_id=5678"
+```
+
+---
+
+### Series info
+
+```
+action=get_series_info
+```
+
+<ParamField query="series_id" type="string" required>
+  The virtual stream ID of the series.
+</ParamField>
+
+---
+
+### Short EPG
+
+```
+action=get_short_epg
+```
+
+or equivalently:
+
+```
+action=get_epg
+```
+
+<ParamField query="stream_id" type="string" required>
+  The virtual stream ID of the live channel.
+</ParamField>
+
+<ParamField query="limit" type="number">
+  Maximum number of EPG entries to return. Defaults to `4`.
+</ParamField>
+
+```bash
+curl "http://localhost:8901/player_api.php?username=alice&password=s3cr3t&action=get_short_epg&stream_id=1234&limit=4"
+```
+
+---
+
+### Catchup table
+
+```
+action=get_catchup_table
+```
+
+<ParamField query="stream_id" type="string" required>
+  The virtual stream ID of the live channel.
+</ParamField>
+
+<ParamField query="start" type="string">
+  Start time for the catchup window.
+</ParamField>
+
+<ParamField query="end" type="string">
+  End time for the catchup window.
+</ParamField>
+
+---
+
+## Stream URLs
+
+Stream URLs are embedded in the playlist items returned by the player API. Media players follow them automatically.
+
+### Live stream (alt path)
+
+```
+GET /{username}/{password}/{stream_id}
+```
+
+### Live stream
+
+```
+GET /live/{username}/{password}/{stream_id}
+```
+
+### Movie / VOD
+
+```
+GET /movie/{username}/{password}/{stream_id}
+```
+
+### Series episode
+
+```
+GET /series/{username}/{password}/{stream_id}
+```
+
+<ParamField path="stream_id" type="string" required>
+  The virtual stream ID, optionally with a file extension (e.g., `12345.ts`, `12345.mkv`).
+</ParamField>
+
+---
+
+## Catchup / timeshift stream
+
+### Path-based
+
+```
+GET /timeshift/{username}/{password}/{duration}/{start}/{stream_id}
+```
+
+<ParamField path="duration" type="string" required>
+  Duration of the timeshift segment.
+</ParamField>
+
+<ParamField path="start" type="string" required>
+  Start time of the timeshift segment (format used by the provider).
+</ParamField>
+
+### Query-based
+
+```
+GET  /timeshift.php?username=...&password=...&stream=...&duration=...&start=...
+POST /timeshift.php
+
+GET  /streaming/timeshift.php?username=...&password=...&stream=...&duration=...&start=...
+```
+
+<ParamField query="stream" type="string" required>
+  The virtual stream ID of the live channel.
+</ParamField>
+
+<ParamField query="duration" type="string" required>
+  Duration of the timeshift window.
+</ParamField>
+
+<ParamField query="start" type="string" required>
+  Start time of the timeshift window.
+</ParamField>
+
+---
+
+## Resource endpoints
+
+Serves associated resources (e.g., cover images, logos) for Xtream playlist items.
+
+```
+GET /resource/live/{username}/{password}/{stream_id}/{resource}
+GET /resource/movie/{username}/{password}/{stream_id}/{resource}
+GET /resource/series/{username}/{password}/{stream_id}/{resource}
+```
+
+---
+
+## Token stream (web UI)
+
+The web UI uses a short-lived JWT access token to stream content without exposing user credentials in URLs.
+
+```
+GET /token/{token}/{target_id}/{cluster}/{stream_id}
+```
+
+<ParamField path="token" type="string" required>
+  Short-lived JWT access token issued by the web UI.
+</ParamField>
+
+<ParamField path="target_id" type="number" required>
+  Internal numeric target ID.
+</ParamField>
+
+<ParamField path="cluster" type="string" required>
+  One of `live`, `movie`, `series`, or `timeshift`.
+</ParamField>
+
+<ParamField path="stream_id" type="string" required>
+  The virtual stream ID.
+</ParamField>
+
+<Note>
+  This endpoint is intended for the built-in web player. Do not use it in external automation as tokens expire quickly.
+</Note>

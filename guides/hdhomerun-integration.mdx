@@ -1,0 +1,200 @@
+---
+title: "HDHomeRun integration"
+description: "Emulate an HDHomeRun network tuner device so Plex, Emby, Jellyfin and TVHeadend can discover tuliprox automatically."
+---
+
+tuliprox can present itself as one or more virtual HDHomeRun network tuner devices. This lets media servers that support HDHomeRun discovery — including Plex DVR, Emby Live TV, Jellyfin Live TV and TVHeadend — find tuliprox on the network without any manual URL entry.
+
+## How HDHomeRun emulation works
+
+When `hdhomerun` is enabled, tuliprox:
+
+1. Advertises each virtual device over **SSDP** (UPnP multicast discovery).
+2. Responds to **SiliconDust proprietary discovery** (UDP broadcast on port 65001).
+3. Serves the HDHomeRun HTTP API on a dedicated port per device (automatically assigned or explicitly configured).
+4. Exposes a lineup that points to the target's stream URLs.
+
+Media servers that scan for HDHomeRun devices will find each virtual device and add it as a live TV source.
+
+## Configuring hdhomerun in config.yml
+
+Add the `hdhomerun` block to your `config.yml`:
+
+```yaml config.yml
+hdhomerun:
+  enabled: true
+  auth: false
+  ssdp_discovery: true
+  proprietary_discovery: true
+  devices:
+    - name: tuliprox_main
+      friendly_name: tuliprox HD
+      tuner_count: 4
+      port: 5004
+```
+
+### Top-level fields
+
+| Field | Default | Description |
+|---|---|---|
+| `enabled` | `false` | Enable HDHomeRun emulation |
+| `auth` | `false` | Require lineup authentication |
+| `ssdp_discovery` | `true` | Advertise via SSDP/UPnP multicast |
+| `proprietary_discovery` | `true` | Respond to SiliconDust UDP broadcast discovery |
+| `devices` | — | List of virtual device definitions |
+
+### Device fields
+
+| Field | Default | Description |
+|---|---|---|
+| `name` | auto-generated | Internal identifier (must be unique) |
+| `friendly_name` | `HDHomeRun` | Display name shown in media servers |
+| `manufacturer` | `SiliconDust` | Reported manufacturer string |
+| `model_name` | `HDTC-2US` | Reported model name |
+| `model_number` | `HDTC-2US` | Reported model number |
+| `firmware_name` | `hdhomeruntc_atsc` | Reported firmware name |
+| `firmware_version` | — | Reported firmware version |
+| `device_id` | auto-generated | 8-character hex device ID (auto-generated if empty) |
+| `device_udn` | auto-generated | UUID for UPnP (auto-generated if empty) |
+| `device_type` | — | UPnP device type string |
+| `port` | auto-assigned | HTTP port for this device's HDHomeRun API |
+| `tuner_count` | `1` | Number of virtual tuners to report |
+
+<Note>
+  If `device_id` or `device_udn` are left empty, tuliprox generates stable values
+  derived from the device `name`. Set them explicitly if you need reproducible
+  values across restarts.
+</Note>
+
+## Wiring to a target
+
+Add an `hdhomerun` output to the target in `source.yml` and reference the device by name:
+
+```yaml source.yml
+sources:
+  - inputs:
+      - my_provider
+    targets:
+      - name: all_channels
+        output:
+          - type: m3u
+          - type: hdhomerun
+            device: tuliprox_main
+            username: hdhr_user
+            use_output: m3u
+```
+
+### HDHomeRun output fields
+
+| Field | Description |
+|---|---|
+| `device` | Name of the device defined in the `hdhomerun` config block |
+| `username` | Credential used by the media server when fetching the lineup |
+| `use_output` | Which output type to use for stream URLs: `m3u` or `xtream` |
+
+<Warning>
+  `hdhomerun` output must be used together with at least one `m3u` or `xtream` output
+  on the same target. Set `use_output` to match the additional output type you added.
+</Warning>
+
+## Full example
+
+<CodeGroup>
+
+```yaml config.yml
+api:
+  host: 0.0.0.0
+  port: 8901
+  web_root: ./web
+storage_dir: ./data
+update_on_boot: true
+hdhomerun:
+  enabled: true
+  ssdp_discovery: true
+  proprietary_discovery: true
+  devices:
+    - name: tuliprox_main
+      friendly_name: tuliprox HD
+      tuner_count: 4
+      port: 5004
+```
+
+```yaml source.yml
+templates:
+  - name: ALL_CHAN
+    value: 'Group ~ ".*"'
+inputs:
+  - type: xtream
+    name: my_provider
+    url: http://fantastic.provider.xyz:8080
+    username: tvjunkie
+    password: junkie.secret
+sources:
+  - inputs:
+      - my_provider
+    targets:
+      - name: all_channels
+        output:
+          - type: m3u
+          - type: hdhomerun
+            device: tuliprox_main
+            username: hdhr_user
+            use_output: m3u
+        filter: "!ALL_CHAN!"
+```
+
+```yaml api-proxy.yml
+server:
+  - name: default
+    protocol: http
+    host: 192.168.1.41
+    port: 8901
+    timezone: Europe/Berlin
+    message: Welcome to tuliprox
+user:
+  - target: all_channels
+    credentials:
+      - username: hdhr_user
+        password: hdhr.secret
+        proxy: redirect
+        server: default
+```
+
+</CodeGroup>
+
+## Discovering the device in media servers
+
+Once tuliprox is running with `hdhomerun.enabled: true`, media servers on the same network segment will discover it automatically during their next HDHomeRun scan.
+
+### Plex
+
+1. Go to **Settings → Live TV & DVR**.
+2. Click **Set Up Plex DVR**.
+3. Plex scans the network for HDHomeRun devices and should list `tuliprox HD`.
+4. Select it and proceed through the channel scan.
+
+### Emby
+
+1. Go to **Dashboard → Live TV**.
+2. Click **+** to add a tuner device.
+3. Select **HDHomeRun** and click **Search**.
+4. Emby discovers the virtual device automatically.
+
+### Jellyfin
+
+1. Go to **Dashboard → Live TV**.
+2. Under **Tuner Devices** click **Add**.
+3. Select **HDHomeRun** as the type.
+4. Leave the URL blank to use auto-discovery, or enter `http://192.168.1.41:5004` explicitly.
+
+### TVHeadend
+
+1. Open **Configuration → DVB Inputs → TV Adapters**.
+2. TVHeadend auto-detects HDHomeRun devices on the LAN.
+3. The virtual tuliprox device should appear as a network adapter.
+
+<Tip>
+  If auto-discovery does not work, check that the host running tuliprox is on the
+  same broadcast domain as the media server, and that UDP port 65001 is not blocked
+  by a firewall.
+</Tip>

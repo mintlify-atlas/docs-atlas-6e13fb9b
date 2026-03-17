@@ -1,0 +1,150 @@
+---
+title: "XMLTV / EPG API"
+description: "Serve Electronic Programme Guide data in XMLTV format with optional time-shifting and URL rewriting."
+---
+
+The XMLTV API serves EPG (Electronic Programme Guide) data that tuliprox has processed from your configured EPG sources. The output is a standards-compliant XMLTV XML document.
+
+## EPG endpoint
+
+All three paths are equivalent:
+
+| Method | Path |
+|---|---|
+| `GET` | `/xmltv.php` |
+| `GET` | `/epg` |
+| `GET` | `/update/epg.php` |
+
+### Parameters
+
+<ParamField query="username" type="string" required>
+  The username defined in `api-proxy.yml`.
+</ParamField>
+
+<ParamField query="password" type="string" required>
+  The password for the user.
+</ParamField>
+
+<ParamField query="token" type="string">
+  Token credential. Accepted in place of `username` + `password`.
+</ParamField>
+
+### Response
+
+Returns a `text/xml` streaming response in XMLTV format.
+
+tuliprox applies the following transformations before serving:
+
+- **Time-shifting**: If the user has `epg_timeshift` configured, all programme start and stop times are shifted accordingly.
+- **URL rewriting**: If `epg_timeshift` is set or URL rewriting is enabled, icon/logo URLs in the EPG are rewritten to proxy through tuliprox.
+
+If no EPG file has been built for the target yet, an empty but valid XMLTV document is returned:
+
+```xml
+<?xml version="1.0" encoding="utf-8" ?>
+<!DOCTYPE tv SYSTEM "xmltv.dtd">
+<tv generator-info-name="Xtream Codes" generator-info-url=""></tv>
+```
+
+### Error responses
+
+| Condition | Response |
+|---|---|
+| Invalid credentials | HTTP `403` (or configured `auth_error_status`) |
+| User permission denied | HTTP `403 Forbidden` |
+| No EPG configured for target | Empty XMLTV document (HTTP `200`) |
+
+### Examples
+
+<Tabs>
+  <Tab title="xmltv.php">
+    ```bash
+    curl "http://localhost:8901/xmltv.php?username=alice&password=s3cr3t"
+    ```
+  </Tab>
+  <Tab title="/epg alias">
+    ```bash
+    curl "http://localhost:8901/epg?username=alice&password=s3cr3t"
+    ```
+  </Tab>
+  <Tab title="Save to file">
+    ```bash
+    curl "http://localhost:8901/xmltv.php?username=alice&password=s3cr3t" \
+      -o epg.xml
+    ```
+  </Tab>
+  <Tab title="Token auth">
+    ```bash
+    curl "http://localhost:8901/xmltv.php?token=my-unique-token"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## XMLTV document structure
+
+The response is a standard XMLTV document. Each channel with at least one programme entry is included.
+
+```xml
+<?xml version="1.0" encoding="utf-8" ?>
+<!DOCTYPE tv SYSTEM "xmltv.dtd">
+<tv generator-info-name="X" generator-info-url="http://localhost:8901">
+
+  <channel id="channel.id.here">
+    <display-name>Channel Name</display-name>
+    <icon src="http://localhost:8901/resource/epg/alice/s3cr3t/..."/>
+  </channel>
+
+  <programme start="20260317120000" stop="20260317130000" channel="channel.id.here">
+    <title>Show Title</title>
+    <desc>Show description text.</desc>
+  </programme>
+
+</tv>
+```
+
+<Tip>
+  The `generator-info-url` attribute in the `<tv>` element contains the server's base URL, which is useful for debugging which tuliprox instance served the EPG.
+</Tip>
+
+---
+
+## EPG resource proxy
+
+When URL rewriting is enabled, icon URLs in the EPG are rewritten to route through this endpoint, which obscures the original provider URL and proxies the image through tuliprox.
+
+```
+GET /resource/epg/{username}/{password}/{resource}
+```
+
+<ParamField path="username" type="string" required>
+  The authenticated username.
+</ParamField>
+
+<ParamField path="password" type="string" required>
+  The authenticated password.
+</ParamField>
+
+<ParamField path="resource" type="string" required>
+  The obfuscated resource identifier (generated internally by tuliprox). Not intended to be constructed manually.
+</ParamField>
+
+---
+
+## EPG time-shifting
+
+Per-user EPG time-shifting lets you offset programme times. This is useful when a provider's EPG times are in the wrong timezone for your users.
+
+Configure it in `api-proxy.yml`:
+
+```yaml
+credentials:
+  - username: alice
+    password: s3cr3t
+    epg_timeshift: "+120"   # shift all times forward by 120 minutes
+```
+
+Accepted formats:
+- `"+60"` or `"-60"` — shift by ±N minutes
+- A timezone name such as `"Europe/Berlin"` — express times in the target timezone

@@ -1,0 +1,176 @@
+---
+title: "Upgrading"
+description: "Upgrade tuliprox safely across Docker, binary, and source installations."
+---
+
+## Before you upgrade
+
+<Steps>
+  <Step title="Read the changelog">
+    Check the [CHANGELOG](https://github.com/euzu/tuliprox/blob/develop/CHANGELOG.md) for breaking changes before upgrading. Breaking changes in tuliprox include configuration renames, data format changes, and storage migrations that require manual steps.
+  </Step>
+  <Step title="Back up your configuration">
+    Ensure your config files are backed up. If you have configured `backup_dir`, the Web UI writes config snapshots there automatically:
+
+    ```yaml
+    backup_dir: ./data/backup
+    ```
+
+    You can also copy the files manually:
+
+    ```bash
+    cp -r /home/tuliprox/config /home/tuliprox/config.bak
+    ```
+  </Step>
+  <Step title="Note your current version">
+    Record the version you are running before upgrading so you can roll back if needed.
+  </Step>
+</Steps>
+
+## Upgrade methods
+
+<Tabs>
+  <Tab title="Docker">
+    <Steps>
+      <Step title="Pull the new image">
+        ```bash
+        docker pull ghcr.io/euzu/tuliprox-alpine:latest
+        ```
+
+        Or for a specific version tag:
+
+        ```bash
+        docker pull ghcr.io/euzu/tuliprox-alpine:1.2.3
+        ```
+      </Step>
+      <Step title="Restart the container">
+        ```bash
+        docker compose down
+        docker compose up -d
+        ```
+
+        If you are not using Compose:
+
+        ```bash
+        docker stop tuliprox
+        docker rm tuliprox
+        docker run -d --name tuliprox \
+          -v /home/tuliprox/config:/app/config \
+          -v /home/tuliprox/data:/app/data \
+          -p 8901:8901 \
+          ghcr.io/euzu/tuliprox-alpine:latest
+        ```
+      </Step>
+      <Step title="Verify startup">
+        Check the container logs for errors:
+
+        ```bash
+        docker logs -f tuliprox
+        ```
+
+        Confirm the Web UI loads and streams are accessible.
+      </Step>
+    </Steps>
+  </Tab>
+
+  <Tab title="Binary">
+    <Steps>
+      <Step title="Stop the running service">
+        ```bash
+        systemctl stop tuliprox
+        ```
+
+        Or, if running manually, send `SIGTERM` to the process.
+      </Step>
+      <Step title="Replace the binary">
+        Download the new binary from the [GitHub releases page](https://github.com/euzu/tuliprox/releases) and replace the existing one:
+
+        ```bash
+        cp tuliprox /usr/local/bin/tuliprox
+        chmod +x /usr/local/bin/tuliprox
+        ```
+      </Step>
+      <Step title="Start the service">
+        ```bash
+        systemctl start tuliprox
+        ```
+
+        Check the journal for startup errors:
+
+        ```bash
+        journalctl -u tuliprox -f
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+
+  <Tab title="From source">
+    <Steps>
+      <Step title="Pull the latest code">
+        ```bash
+        git pull origin main
+        ```
+
+        If you track the `develop` branch:
+
+        ```bash
+        git pull origin develop
+        ```
+      </Step>
+      <Step title="Rebuild">
+        ```bash
+        cargo build --release --bin tuliprox
+        ```
+      </Step>
+      <Step title="Restart the process">
+        Stop the running instance and start the newly built binary:
+
+        ```bash
+        ./target/release/tuliprox -s -c config/config.yml -i config/source.yml
+        ```
+      </Step>
+    </Steps>
+  </Tab>
+</Tabs>
+
+## Hot reload vs full restart
+
+For certain changes, a full restart is not required. The `config_hot_reload` option enables live reloading of mapping files and API-proxy configuration:
+
+```yaml
+config_hot_reload: true
+```
+
+When enabled, tuliprox watches `mapping.yml` (or the configured `mapping_path` directory) and `api-proxy.yml` for changes and applies them without stopping the server.
+
+<Note>
+  Hot reload covers mapping rules and API-proxy users. Changes to `config.yml` itself — such as `reverse_proxy`, `api`, `log`, or `messaging` settings — require a full restart to take effect.
+</Note>
+
+## Breaking changes
+
+Breaking changes have appeared between major versions. Before upgrading, check the CHANGELOG for entries marked **Breaking Changes**. Past examples include:
+
+- `working_dir` renamed to `storage_dir`
+- `threads` (integer) renamed to `process_parallel` (boolean)
+- Storage format changes requiring the `data/` directory to be cleared and playlists re-fetched
+- Input batch URLs changed from `file://` to the `batch://` scheme
+- `library.metadata.path` moved to `metadata_update.cache_path`
+- `dns.resolved` removed from `source.yml`; resolved IPs now persisted in `{storage_dir}/provider_dns_resolved.json`
+- `forced_retry_interval_secs` removed
+- `rewrite_secret` added as a mandatory field under `reverse_proxy`
+
+<Warning>
+  If the CHANGELOG notes a data format change, clear your `storage_dir` after upgrading and trigger a fresh playlist update. Plex, Jellyfin, and other clients may need to re-scan their libraries after virtual IDs are reassigned.
+</Warning>
+
+## Configuration migration notes
+
+After reviewing the changelog, update your `config.yml` for any renamed or restructured fields. A common pattern is to run the server once with `log_level: debug` after upgrading to surface any unrecognised or deprecated configuration keys:
+
+```yaml
+log:
+  log_level: debug
+```
+
+Tuliprox logs warnings for unknown keys, making it straightforward to identify fields that need renaming.

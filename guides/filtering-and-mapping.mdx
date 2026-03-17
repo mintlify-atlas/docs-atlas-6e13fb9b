@@ -1,0 +1,366 @@
+---
+title: "Filtering and mapping"
+description: "Use the filter DSL, template system and mapper DSL to control which channels appear and how they are named."
+---
+
+tuliprox gives you two editorial layers:
+
+1. **Filters** — decide which channels survive into a target.
+2. **Mapping** — rename, regroup and enrich the channels that pass.
+
+Both layers share the same template system for reusable expressions.
+
+## Filter DSL
+
+Filters are string expressions evaluated against each playlist entry.
+
+### Fields
+
+| Field | Description |
+|---|---|
+| `Group` | Group/category name |
+| `Title` | Channel title |
+| `Name` | Channel name |
+| `Caption` | Display caption |
+| `Url` | Stream URL |
+| `Genre` | Genre tag |
+| `Input` | Name of the source input |
+| `Type` | Content type: `live`, `vod` or `series` |
+
+### Operators
+
+| Operator | Meaning |
+|---|---|
+| `~` | Regex match |
+| `==` | Exact string equals |
+| `!=` | String not equals |
+| `AND` | Logical AND |
+| `OR` | Logical OR |
+| `NOT(...)` | Logical NOT |
+
+Regex syntax follows the Rust `regex` crate. Use `(?i)` for case-insensitive matching.
+For interactive testing, [regex101.com](https://regex101.com) works well when the **Rust** flavour is selected.
+
+### Basic examples
+
+Include all channels:
+
+```text
+Group ~ ".*"
+```
+
+Only shopping channels:
+
+```text
+Group ~ "(?i).*Shopping.*"
+```
+
+Exclude shopping channels:
+
+```text
+NOT(Group ~ "(?i).*Shopping.*")
+```
+
+Only live channels:
+
+```text
+Type == live
+```
+
+Exclude a single channel by title:
+
+```text
+NOT(Title ~ "FR: TV5Monde")
+```
+
+Exclude a channel only within a specific group:
+
+```text
+NOT(Group ~ "FR: TF1" AND Title ~ "FR: TV5Monde")
+```
+
+### Combining operators
+
+```text
+(Group ~ "^FR.*" AND NOT(Group ~ "^FR.*SERIES.*" OR Group ~ "^DE.*EINKAUFEN.*")) OR (Group ~ "^AU.*")
+```
+
+```text
+((Group ~ "^DE.*") AND (NOT Title ~ ".*Shopping.*")) OR (Group ~ "^AU.*")
+```
+
+## Template system
+
+Templates let you name reusable filter fragments and reference them with `!name!` syntax.
+
+### Defining templates
+
+```yaml source.yml
+templates:
+  - name: NO_SHOPPING
+    value: 'NOT(Group ~ "(?i).*Shopping.*" OR Group ~ "(?i).*Einkaufen.*")'
+  - name: GERMAN_CHANNELS
+    value: 'Group ~ "^DE: .*"'
+  - name: FRENCH_CHANNELS
+    value: 'Group ~ "^FR: .*"'
+  - name: MY_CHANNELS
+    value: '!NO_SHOPPING! AND (!GERMAN_CHANNELS! OR !FRENCH_CHANNELS!)'
+```
+
+### Using templates in targets
+
+```yaml source.yml
+sources:
+  - inputs:
+      - my_provider
+    targets:
+      - name: my_target
+        filter: "!MY_CHANNELS!"
+        output:
+          - type: m3u
+```
+
+Templates can also be shared across files. Set `template_path` in `config.yml` to a file or directory of `*.yml` files:
+
+```yaml config.yml
+template_path: ./config/templates
+```
+
+Templates can also be used inside regex patterns by embedding them inline:
+
+```yaml mapping.yml
+templates:
+  - name: delimiter
+    value: '[\s_-]*'
+  - name: quality
+    value: '(?i)(?P<quality>HD|LQ|4K|UHD)?'
+```
+
+Referenced in a pattern as:
+
+```text
+^.*TF1!delimiter!Series?!delimiter!Films?(!delimiter!!quality!)\s*$
+```
+
+## Rename rules
+
+Simple group/channel renaming is available directly on a target without a full mapper:
+
+```yaml source.yml
+rename:
+  - field: group
+    pattern: '^DE(.*)'
+    new_name: '1. DE$1'
+```
+
+`field` can be `group`, `title`, `name` or `caption`. `pattern` is a Rust regex; `new_name` supports `$1`, `$2` capture-group references.
+
+## Mapper DSL
+
+For complex transformations, define a `mapping.yml` and reference the mapping ID from the target.
+
+### Structure of mapping.yml
+
+```yaml mapping.yml
+mappings:
+  templates:
+    - name: QUALITY
+      value: '(?i)\b([FUSL]?HD|SD|4K|1080p|720p|3840p)\b'
+  mapping:
+    - id: all_channels
+      match_as_ascii: true
+      mapper:
+        - filter: 'Caption ~ "(?i)^(US|USA|United States).*?TNT"'
+          script: |
+            quality = uppercase(@Caption ~ "!QUALITY!")
+            quality = map quality {
+              "720p" => "HD",
+              "1080p" => "FHD",
+              "4K" => "UHD",
+              "3840p" => "UHD",
+              _ => quality,
+            }
+            @Group = "United States - Entertainment"
+```
+
+Reference the mapping from a target:
+
+```yaml source.yml
+targets:
+  - name: all_channels
+    mapping:
+      - all_channels
+    output:
+      - type: xtream
+```
+
+### Playlist field variables
+
+Access playlist fields with the `@Field` syntax:
+
+| Variable | Description |
+|---|---|
+| `@Group` | Group name (writable) |
+| `@Caption` | Display caption (writable) |
+| `@Title` | Title (writable) |
+| `@Name` | Channel name (writable) |
+| `@Url` | Stream URL |
+| `@Genre` | Genre tag |
+| `@Input` | Source input name |
+| `@Type` | Content type |
+
+Assigning to `@Group`, `@Caption` etc. changes the value in the output.
+
+### Built-in functions
+
+| Function | Description |
+|---|---|
+| `concat(a, b, ...)` | Concatenate strings |
+| `uppercase(s)` | Convert to upper case |
+| `lowercase(s)` | Convert to lower case |
+| `capitalize(s)` | Capitalise first letter |
+| `trim(s)` | Strip leading/trailing whitespace |
+| `number(s)` | Parse string to number |
+| `first(a, b)` | Return first non-null value |
+| `replace(s, pattern, replacement)` | Regex replacement |
+| `pad(n, width)` | Zero-pad a number |
+| `format(template, ...)` | String formatting |
+| `print(s)` | Log value for debugging |
+| `template(name)` | Expand a named template |
+| `add_favourite(group)` | Add channel to a favourite group |
+
+### Regex captures
+
+Capture groups from a regex match are accessed with `.1`, `.2` etc.:
+
+```dsl
+title_match = @Caption ~ "(.*?)\\:\\s*(.*)"
+title_prefix = title_match.1
+title_name = title_match.2
+```
+
+Named captures use the capture group name:
+
+```dsl
+quality = @Caption ~ "\\b(?P<quality>[F]?HD[i]?)\\b"
+```
+
+### match blocks
+
+```dsl
+result = match {
+  (var1, var2) => result1,
+  var2 => result2,
+  _ => default
+}
+```
+
+### map blocks
+
+```dsl
+quality = map quality {
+  "720p" => "HD",
+  "1080p" => "FHD",
+  "4K" => "UHD",
+  _ => quality,
+}
+```
+
+### for_each
+
+Iterate over split values or capture groups:
+
+```dsl
+genres = split(@Genre, "[,/&]")
+genres.for_each((_, genre) => {
+  add_favourite(concat("Genre - ", genre))
+})
+```
+
+## Complex mapping example
+
+This script groups French channels into quality and category buckets:
+
+```dsl
+group = @Group ~ "(EU|SATELLITE|NATIONAL|NEWS|MUSIC|SPORT|RELIGION|FILM|KIDS|DOCU)"
+quality = @Caption ~ "\\b([F]?HD[i]?)\\b"
+title_match = @Caption ~ "(.*?)\\:\\s*(.*)"
+title_name = title_match.2
+
+quality = map group {
+  "NEWS" | "NATIONAL" | "SATELLITE" => quality,
+  _ => null,
+}
+
+prefix = map quality {
+  "HD" => "01.",
+  "FHD" => "02.",
+  "HDi" => "03.",
+  _ => map group {
+    "NEWS" => "04.",
+    "DOCU" => "05.",
+    "SPORT" => "06.",
+    _ => group
+  },
+}
+
+name = match {
+  quality => concat(prefix, " FR [", quality, "]"),
+  group => concat(prefix, " FR [", group, "]"),
+  _ => prefix
+}
+
+@Group = name
+@Caption = title_name
+```
+
+## Grouping by release year
+
+```dsl
+year_text = @Caption ~ "(\\d{4})\\)?$"
+year = number(year_text)
+year_group = map year {
+  ..2019 => "< 2020",
+  _ => year_text,
+}
+@Group = concat("FR | MOVIES ", year_group)
+```
+
+## Counters
+
+Counters append or prepend an incrementing number to a field:
+
+```yaml mapping.yml
+mappings:
+  mapping:
+    - id: simple
+      counter:
+        - filter: 'Group ~ ".*FR.*"'
+          value: 9000
+          field: title
+          padding: 2
+          modifier: suffix
+          concat: " - "
+```
+
+| Field | Description |
+|---|---|
+| `filter` | Which channels receive the counter |
+| `value` | Starting counter value |
+| `field` | Target field: `group`, `title`, `name` or `caption` |
+| `modifier` | `prefix` or `suffix` |
+| `concat` | Separator string between field value and counter |
+| `padding` | Minimum digit width (zero-padded) |
+
+## Processing order
+
+By default tuliprox applies Filter → Rename → Map. Change this with `processing_order`:
+
+```yaml source.yml
+targets:
+  - name: all_channels
+    processing_order: fmr
+```
+
+Valid values: `frm`, `fmr`, `rfm`, `rmf`, `mfr`, `mrf`
+(f = filter, r = rename, m = map).

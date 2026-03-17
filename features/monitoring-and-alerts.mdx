@@ -1,0 +1,197 @@
+---
+title: "Monitoring and alerts"
+description: "Send notifications to Telegram, Discord, Pushover, or any REST endpoint. Track playlist group changes and watch specific groups for real-time alerts."
+---
+
+tuliprox can send notifications when important events occur — playlist updates complete, errors are detected, watched groups change, or usage statistics are ready. Notifications are configured under the `messaging` key in `config.yml`.
+
+## Notification providers
+
+<Tabs>
+  <Tab title="Telegram">
+    ```yaml
+    messaging:
+      notify_on:
+        - info
+        - stats
+        - error
+        - watch
+      telegram:
+        markdown: true
+        bot_token: "<your bot token>"
+        chat_ids:
+          - "<chat id>"
+          - "<chat id>:<thread id>"
+    ```
+
+    Set `markdown: true` to send messages with Telegram's MarkdownV2 formatting. Use the `<chat id>:<thread id>` syntax to post into a specific topic thread in a group.
+  </Tab>
+  <Tab title="Discord">
+    ```yaml
+    messaging:
+      notify_on:
+        - info
+        - error
+        - watch
+      discord:
+        webhook_url: "https://discord.com/api/webhooks/..."
+    ```
+
+    Discord notifications are sent as webhook messages. tuliprox uses the `content` field of the webhook payload.
+  </Tab>
+  <Tab title="Pushover">
+    ```yaml
+    messaging:
+      notify_on:
+        - error
+        - watch
+      pushover:
+        app_token: "<your app token>"
+        user_key: "<your user key>"
+    ```
+
+    Pushover delivers push notifications to iOS and Android devices.
+  </Tab>
+  <Tab title="REST">
+    ```yaml
+    messaging:
+      notify_on:
+        - info
+        - stats
+        - error
+      rest:
+        url: "https://your-endpoint.example/notify"
+        method: POST
+        headers:
+          Authorization: "Bearer your-token"
+    ```
+
+    The REST provider sends an HTTP request to any endpoint you control. Use this to integrate with custom webhooks, Slack incoming webhooks, or any other HTTP-based notification system.
+  </Tab>
+</Tabs>
+
+## `notify_on` events
+
+The `notify_on` list controls which event types trigger notifications:
+
+| Event | When it fires |
+|---|---|
+| `info` | General informational messages, including successful playlist updates |
+| `stats` | Usage statistics after a playlist update completes |
+| `error` | Errors during processing, streaming, or metadata resolution |
+| `watch` | A watched group changes (channels added, removed, or modified) |
+
+You can include any combination of these events. Leave `notify_on` empty to disable all notifications while keeping the provider config in place.
+
+## Message templates
+
+tuliprox uses [Handlebars](https://handlebarsjs.com) to render notification messages. Templates have access to the following variables:
+
+| Variable | Type | Description |
+|---|---|---|
+| `message` | string | The human-readable event description |
+| `kind` | string | The event type (`info`, `stats`, `error`, `watch`) |
+| `timestamp` | string | ISO 8601 timestamp of the event |
+| `stats` | object | Playlist statistics (channel counts, group counts, etc.) — present for `stats` events |
+| `watch` | object | Group change details — present for `watch` events |
+| `processing` | object | Processing result details — present after playlist updates |
+
+### Loading templates from files or URLs
+
+Instead of embedding a template string inline, you can point tuliprox to a file or remote URL:
+
+```yaml
+messaging:
+  notify_on:
+    - stats
+  telegram:
+    bot_token: "<token>"
+    chat_ids:
+      - "<chat id>"
+    template: "file:///etc/tuliprox/templates/stats.hbs"
+```
+
+Supported URI schemes for templates:
+
+| Scheme | Example |
+|---|---|
+| `file://` | `file:///etc/tuliprox/templates/update.hbs` |
+| `http://` | `http://config-server.internal/notify-template.hbs` |
+| `https://` | `https://config-server.example/notify-template.hbs` |
+
+## Watching groups for changes
+
+The `watch` feature in a target monitors final group names and emits a `watch` notification whenever those groups gain or lose channels.
+
+Configure `watch` on a target in `source.yml`:
+
+```yaml
+targets:
+  - name: my_target
+    output:
+      - type: m3u
+    watch:
+      - 'FR - Movies \(202[34]\)'
+      - 'FR - Series'
+```
+
+Each entry is a regex matched against the final group names after all processing has completed. When tuliprox detects a change in a watched group after a playlist update, it fires a `watch` notification through all configured providers.
+
+<Note>
+  The `watch` event in `notify_on` must be enabled for watch notifications to be delivered.
+</Note>
+
+## Web UI monitoring
+
+The built-in Web UI provides real-time visibility into tuliprox's state without any external tooling:
+
+- **Active streams** — see which channels are being streamed and by which users right now
+- **User sessions** — connected users, their priority, and connection counts
+- **Playlist state** — inspect the current processed playlist, group counts, and channel lists
+- **Download manager** — queue and monitor video downloads (when the `video.download` integration is enabled)
+
+Enable the Web UI in `config.yml`:
+
+```yaml
+web_ui:
+  enabled: true
+  user_ui_enabled: true
+  auth:
+    enabled: true
+    issuer: tuliprox
+    secret: "<jwt secret>"
+    userfile: user.txt
+```
+
+The `userfile` contains one `username:password_hash` entry per line. Generate password hashes with:
+
+```bash
+tuliprox --genpwd
+```
+
+<Tip>
+  Set `combine_views_stats_streams: true` under `web_ui` to merge the stats and active-streams views into a single dashboard panel.
+</Tip>
+
+## Full messaging example
+
+This example sends info and error events to Telegram, and watch events to both Telegram and a custom REST endpoint:
+
+```yaml
+messaging:
+  notify_on:
+    - info
+    - stats
+    - error
+    - watch
+  telegram:
+    markdown: true
+    bot_token: "123456:ABCDefgh..."
+    chat_ids:
+      - "-100123456789"
+  rest:
+    url: "https://hooks.example.com/tuliprox"
+    method: POST
+    headers:
+      Content-Type: "application/json"
+```

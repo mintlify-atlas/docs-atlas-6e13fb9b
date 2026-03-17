@@ -1,0 +1,143 @@
+---
+title: "Authentication"
+description: "How tuliprox authenticates clients across its M3U, Xtream, XMLTV, and management API surfaces."
+---
+
+tuliprox supports several authentication mechanisms depending on the API surface.
+
+## Credential-based auth (M3U, Xtream, XMLTV)
+
+Playlist and stream endpoints identify users by **username + password** supplied as URL query parameters.
+
+```
+GET /player_api.php?username=alice&password=s3cr3t
+GET /get.php?username=alice&password=s3cr3t
+GET /xmltv.php?username=alice&password=s3cr3t
+```
+
+The same credentials can also be sent as a `POST` form body:
+
+```bash
+curl -X POST http://localhost:8901/get.php \
+  -d "username=alice&password=s3cr3t&type=m3u_plus"
+```
+
+Credentials are defined per target in `api-proxy.yml`:
+
+```yaml
+user:
+  - target: my_target
+    credentials:
+      - username: alice
+        password: s3cr3t
+        proxy: reverse
+        server: default
+        max_connections: 2
+        status: Active
+```
+
+## Token-based auth
+
+If a user entry has a `token` field set, that token can be used in place of `username` + `password`:
+
+```yaml
+credentials:
+  - username: alice
+    password: s3cr3t
+    token: my-unique-token
+```
+
+Then call:
+
+```
+GET /player_api.php?token=my-unique-token
+GET /get.php?token=my-unique-token
+```
+
+<Note>
+  Tokens must be unique across all users. tuliprox rejects duplicate tokens at save time.
+</Note>
+
+## Authentication error status
+
+When credentials are invalid or missing, tuliprox returns a configurable HTTP status code. The default is `403 Forbidden`.
+
+Change it in `api-proxy.yml`:
+
+```yaml
+auth_error_status: 403
+```
+
+This applies to `/player_api.php`, `/get.php`, `/xmltv.php`, stream paths, and resource paths. The management API (`/api/v1/`) always uses its own fixed status codes.
+
+## Proxy mode
+
+Each user has a `proxy` setting that controls how tuliprox handles stream traffic:
+
+| Value | Behaviour |
+|---|---|
+| `redirect` | tuliprox returns the provider's stream URL to the client (HTTP redirect) |
+| `reverse` | tuliprox proxies all stream traffic through itself |
+| `reverse[live]` | Reverse proxy only for live streams |
+| `reverse[live,vod]` | Reverse proxy for live and VOD, redirect for series |
+
+```yaml
+credentials:
+  - username: alice
+    password: s3cr3t
+    proxy: reverse
+```
+
+## Server selection
+
+The optional `server` field in a user's credentials selects which server block (from the `server:` list in `api-proxy.yml`) is used to build stream URLs that tuliprox returns to that user.
+
+```yaml
+credentials:
+  - username: alice
+    password: s3cr3t
+    server: external   # uses the "external" server block
+```
+
+This is useful when some clients connect from inside the LAN and others connect from the internet.
+
+## Access control fields
+
+When `user_access_control: true` is set in `config.yml`, tuliprox also enforces:
+
+| Field | Description |
+|---|---|
+| `status` | Must be `Active` |
+| `exp_date` | Unix timestamp; access is denied after this date |
+| `max_connections` | Maximum simultaneous streams allowed for this user |
+
+Expired or inactive users receive a custom error video stream (if configured) instead of a `403` response.
+
+## JWT auth — web UI and management API
+
+The management API (`/api/v1/`) and web UI are protected by **JWT bearer tokens**. These are issued by the login endpoint of the user API and must be included in the `Authorization` header:
+
+```
+Authorization: Bearer <jwt-token>
+```
+
+<Warning>
+  JWT tokens expire after a short period. The web UI refreshes them automatically. If you call `/api/v1/` endpoints from scripts, handle token expiry and re-authenticate as needed.
+</Warning>
+
+## HDHomeRun basic auth
+
+HDHomeRun devices can optionally require HTTP Basic Auth on the `/lineup.json` endpoint. Enable it by setting `basic_auth: true` in the `hdhr` device configuration in `config.yml`.
+
+```bash
+curl -u alice:s3cr3t http://localhost:5004/lineup.json
+```
+
+## Priority
+
+User `priority` controls which user's streams get provider connections when capacity is limited:
+
+- Lower number = higher priority (e.g., `-1` beats `0`)
+- Negative values are allowed
+- Higher-priority users can preempt lower-priority connections when all provider slots are exhausted
+- `max_connections` is enforced independently of priority

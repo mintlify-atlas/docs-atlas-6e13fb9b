@@ -1,0 +1,183 @@
+---
+title: "Local media library"
+description: "Scan local directories, enrich metadata via TMDB, probe streams with ffprobe, and expose your media through Xtream or M3U outputs."
+---
+
+tuliprox can scan your local media directories and integrate the results into the same Xtream or M3U outputs it publishes for live IPTV. This lets you manage local movies and series alongside provider content in a single interface.
+
+## How it works
+
+<Steps>
+  <Step title="Configure scan directories">
+    Add one or more directories under `library.scan_directories` in `config.yml`. Each directory can have its own `content_type` and `recursive` setting.
+  </Step>
+  <Step title="Run a library scan">
+    Trigger a scan manually via the Web UI or schedule it with a `LibraryScan` cron job. tuliprox walks the directory tree, discovers media files by extension, and classifies them as movies or series.
+  </Step>
+  <Step title="Enrich metadata">
+    tuliprox reads any existing `.nfo` sidecar files and, if TMDB enrichment is enabled, queries the TMDB API to fill in titles, descriptions, posters, and other metadata.
+  </Step>
+  <Step title="Probe streams">
+    If ffprobe integration is enabled, tuliprox probes discovered files to determine codec, resolution, and duration information.
+  </Step>
+  <Step title="Expose via outputs">
+    Add a `library` input to a source and publish it through any supported output type. Library content appears alongside live and VOD content from IPTV providers.
+  </Step>
+</Steps>
+
+## Library configuration
+
+```yaml
+library:
+  enabled: true
+  scan_directories:
+    - enabled: true
+      path: "/media/movies"
+      content_type: movie
+      recursive: true
+    - enabled: true
+      path: "/media/tv"
+      content_type: series
+      recursive: true
+    - enabled: true
+      path: "/media/mixed"
+      content_type: auto
+      recursive: true
+  supported_extensions: ["mp4", "mkv", "avi", "mov", "ts", "m4v", "webm"]
+```
+
+### `content_type`
+
+| Value | Behaviour |
+|---|---|
+| `movie` | All files in this directory are treated as movies |
+| `series` | All files in this directory are treated as series episodes |
+| `auto` | tuliprox classifies each file based on naming patterns and directory structure |
+
+### Supported extensions
+
+The default list of recognised extensions is:
+
+```text
+mp4  mkv  avi  mov  ts  m4v  webm
+```
+
+Override this globally via `library.supported_extensions` or per-directory if needed.
+
+## NFO files
+
+tuliprox reads and writes Kodi-compatible `.nfo` sidecar files placed next to media files. On scan, it reads existing NFO metadata and merges it with the internal library record. After a TMDB lookup, it can write enriched metadata back to the NFO file so other tools can benefit from it.
+
+## TMDB enrichment
+
+Enable TMDB to automatically match library entries against The Movie Database and retrieve posters, descriptions, release years, genres, and more.
+
+```yaml
+metadata_update:
+  tmdb:
+    enabled: true
+    api_key: "your_tmdb_api_key"
+    rate_limit_ms: 250
+    language: "en"
+    cache_duration_days: 30
+    match_threshold: 80
+    cooldown: 7d
+```
+
+| Field | Description |
+|---|---|
+| `api_key` | Your TMDB API v3 key |
+| `rate_limit_ms` | Minimum milliseconds between TMDB API requests |
+| `language` | TMDB response language (e.g. `en`, `de`, `fr`) |
+| `cache_duration_days` | How long to cache a successful TMDB response before re-querying |
+| `match_threshold` | Minimum fuzzy-match score (0–100) to accept a TMDB result |
+| `cooldown` | How long to wait before re-attempting a failed lookup |
+
+<Warning>
+  TMDB imposes a rate limit on API keys. Keep `rate_limit_ms` at `250` or higher to avoid being throttled.
+</Warning>
+
+## ffprobe integration
+
+tuliprox uses ffprobe to probe media files for technical stream information such as video codec, resolution, audio tracks, and duration.
+
+```yaml
+metadata_update:
+  ffprobe:
+    enabled: true
+    timeout: 30s
+    analyze_duration: 5000000
+    probe_size: 5000000
+    live_analyze_duration: 1000000
+    live_probe_size: 1000000
+```
+
+| Field | Description |
+|---|---|
+| `enabled` | Enable or disable ffprobe probing |
+| `timeout` | Maximum time to wait for a probe to complete |
+| `analyze_duration` | Microseconds of data to analyze for file-based content |
+| `probe_size` | Bytes to probe for file-based content |
+| `live_analyze_duration` | Microseconds of data to analyze for live streams |
+| `live_probe_size` | Bytes to probe for live streams |
+
+Probe tasks run at the priority configured in `metadata_update.probe.user_priority`. Setting this to a high number (e.g. `127`) ensures probing never preempts active user playback.
+
+## Retry and backoff
+
+Metadata resolve and probe tasks use configurable retry policies to handle transient failures:
+
+```yaml
+metadata_update:
+  resolve:
+    max_retry_backoff: 1h
+    min_retry_base: 5s
+    max_attempts: 3
+    exhaustion_reset_gap: 1h
+  probe:
+    cooldown: 7d
+    retry_load_retry_delay: 1m
+    retry_backoff_step_1: 10m
+    retry_backoff_step_2: 30m
+    retry_backoff_step_3: 1h
+    max_attempts: 3
+    backoff_jitter_percent: 20
+    user_priority: 127
+```
+
+Duration fields accept `s`, `m`, `h`, or `d` suffixes.
+
+## Integrating with outputs
+
+Add a `library` input type to your `source.yml` to expose library content through any output:
+
+```yaml
+inputs:
+  - name: local_library
+    type: library
+    enabled: true
+
+sources:
+  - inputs:
+      - my_xtream_provider
+      - local_library
+    targets:
+      - name: combined
+        output:
+          - type: xtream
+          - type: m3u
+```
+
+Library items receive stable virtual IDs so that Xtream-based clients maintain consistent watch history and favourites across scans.
+
+## Scheduling library scans
+
+Automate scans with a `LibraryScan` schedule:
+
+```yaml
+schedules:
+  - schedule: "0 0 3 * * * *"
+    type: LibraryScan
+```
+
+The cron expression uses a leading seconds field: `seconds minutes hours day-of-month month day-of-week year`.

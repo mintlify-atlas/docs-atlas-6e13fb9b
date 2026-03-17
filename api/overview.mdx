@@ -1,0 +1,65 @@
+---
+title: "API overview"
+description: "All API surfaces exposed by tuliprox — M3U, Xtream Codes, HDHomeRun, XMLTV, and management REST endpoints."
+---
+
+tuliprox listens on a single HTTP port (default **8901**) and serves several distinct API surfaces from that port.
+
+**Base URL**
+
+```
+http://<host>:8901
+```
+
+The port is set in `config.yml`. If tuliprox is behind a reverse proxy with a `path` prefix configured in `api-proxy.yml`, prepend that path to every URL shown in this reference.
+
+## API groups
+
+<CardGroup cols={2}>
+  <Card title="M3U API" icon="list" href="/api/m3u">
+    Download processed M3U/M3U8 playlists and stream live, VOD, and series content. Endpoints: `GET /get.php`, `GET /m3u`, `GET /apiget`.
+  </Card>
+  <Card title="Xtream Codes API" icon="tv" href="/api/xtream">
+    Full Xtream Codes-compatible API for media players. Endpoints: `player_api.php`, `panel_api.php`, `/xtream`, stream paths, catchup/timeshift.
+  </Card>
+  <Card title="HDHomeRun API" icon="satellite-dish" href="/api/hdhomerun">
+    Emulates an HDHomeRun network tuner device for Plex, Emby, and Jellyfin. Endpoints: `device.xml`, `discover.json`, `lineup.json`, `lineup_status.json`.
+  </Card>
+  <Card title="XMLTV / EPG API" icon="calendar" href="/api/xmltv">
+    Serve Electronic Programme Guide data in XMLTV format. Endpoints: `GET /xmltv.php`, `GET /epg`, `GET /update/epg.php`.
+  </Card>
+  <Card title="Management API (v1)" icon="wrench" href="/api/v1">
+    REST API for the web UI and automation. Configuration, playlist management, and user CRUD. All routes under `/api/v1/`.
+  </Card>
+  <Card title="Authentication" icon="lock" href="/api/authentication">
+    How username/password, token, and JWT credentials work across all API surfaces.
+  </Card>
+</CardGroup>
+
+## Port and server configuration
+
+The default port is `8901`. Change it in `config.yml`:
+
+```yaml
+port: 8901
+```
+
+If you run tuliprox behind a reverse proxy and want a URL path prefix, set `path` in `api-proxy.yml`:
+
+```yaml
+server:
+  - name: default
+    protocol: http
+    host: tv.example.com
+    port: "443"
+    path: tuliprox
+```
+
+With `path: tuliprox` every endpoint becomes `http://tv.example.com:443/tuliprox/<endpoint>`.
+
+## Protocol notes
+
+- All endpoints use plain **HTTP**. TLS termination is done by an upstream proxy.
+- Playlist and stream endpoints accept both `GET` (query parameters) and `POST` (form body) unless noted otherwise.
+- The management API (`/api/v1/`) uses JSON request and response bodies.
+- HDHomeRun endpoints run on a **separate port** configured under `hdhr` in `config.yml`.

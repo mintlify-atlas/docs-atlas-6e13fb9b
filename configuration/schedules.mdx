@@ -1,0 +1,128 @@
+---
+title: "Scheduled tasks"
+description: "Configure cron-based schedules for playlist updates, library scans, and GeoIP database updates."
+---
+
+Tuliprox includes a built-in scheduler that runs tasks on a cron-based schedule. Schedules are defined in the `schedules` list in `config.yml`.
+
+## Cron expression format
+
+Tuliprox uses a **7-field cron expression** with a leading seconds field:
+
+```text
+┌─────────────── seconds  (0–59)
+│  ┌──────────── minutes  (0–59)
+│  │  ┌───────── hours    (0–23)
+│  │  │  ┌────── day of month (1–31)
+│  │  │  │  ┌─── month  (1–12)
+│  │  │  │  │  ┌─ day of week (0–6, Sunday=0)
+│  │  │  │  │  │  ┌ year (optional)
+│  │  │  │  │  │  │
+0  0  8  *  *  *  *
+```
+
+<Note>
+  The leading **seconds** field is non-standard — most other schedulers use 5 or 6 fields starting at minutes. Make sure to include the seconds field as the first value.
+</Note>
+
+### Common patterns
+
+| Expression | Meaning |
+|------------|---------|
+| `0 0 8 * * * *` | Every day at 08:00:00 |
+| `0 0 20 * * * *` | Every day at 20:00:00 |
+| `0 30 6 * * * *` | Every day at 06:30:00 |
+| `0 0 */6 * * * *` | Every 6 hours |
+| `0 0 8 * * 1 *` | Every Monday at 08:00:00 |
+
+---
+
+## Schedule types
+
+| Type | Description |
+|------|-------------|
+| `PlaylistUpdate` | Fetch and process all (or selected) source inputs |
+| `LibraryScan` | Scan configured local media library directories |
+| `GeoIpUpdate` | Download a fresh GeoIP database |
+
+---
+
+## `PlaylistUpdate`
+
+Triggers a full playlist fetch and processing run. Optionally, restrict the update to specific targets using the `targets` field.
+
+| Field | Description |
+|-------|-------------|
+| `schedule` | 7-field cron expression |
+| `type` | `PlaylistUpdate` |
+| `targets` | Optional list of target names to update (omit to update all) |
+
+```yaml
+schedules:
+  - schedule: "0  0  8  *  *  *  *"
+    type: PlaylistUpdate
+  - schedule: "0  0  14  *  *  *  *"
+    type: PlaylistUpdate
+    targets:
+      - m3u
+```
+
+---
+
+## `LibraryScan`
+
+Triggers an incremental scan of all configured `library.scan_directories`. Only new or changed files are processed.
+
+```yaml
+schedules:
+  - schedule: "0  0  20  *  *  *  *"
+    type: LibraryScan
+```
+
+---
+
+## `GeoIpUpdate`
+
+Downloads and installs a fresh GeoIP database. Useful for keeping IP-based access control and analytics accurate.
+
+```yaml
+schedules:
+  - schedule: "0  0  3  *  *  1  *"
+    type: GeoIpUpdate
+```
+
+---
+
+## Timezone handling
+
+Schedules run in the **server's local timezone** unless you configure the timezone explicitly in your deployment environment. If you are running Tuliprox in Docker, set the `TZ` environment variable to control the timezone:
+
+```yaml
+environment:
+  - TZ=Europe/Paris
+```
+
+<Warning>
+  Cron times are interpreted in the server's local time. If your server timezone differs from your intended schedule timezone, adjust the hour values accordingly or set `TZ` in your environment.
+</Warning>
+
+---
+
+## Combined example
+
+```yaml
+schedules:
+  - schedule: "0  0  8  *  *  *  *"
+    type: PlaylistUpdate
+    targets:
+      - m3u
+  - schedule: "0  0  20  *  *  *  *"
+    type: LibraryScan
+  - schedule: "0  0  3  *  *  1  *"
+    type: GeoIpUpdate
+```
+
+This example:
+- Updates the `m3u` target every day at 08:00
+- Scans the media library every day at 20:00
+- Refreshes the GeoIP database every Monday at 03:00

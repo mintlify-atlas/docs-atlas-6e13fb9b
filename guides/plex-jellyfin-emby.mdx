@@ -1,0 +1,209 @@
+---
+title: "Plex, Jellyfin and Emby"
+description: "Configure tuliprox as a live TV source for Plex, Jellyfin and Emby."
+---
+
+tuliprox can feed live TV channels, EPG data and on-demand content to the three major self-hosted media servers. There are two integration paths:
+
+- **M3U + XMLTV** — all three servers support manual M3U tuner and XMLTV EPG entry.
+- **HDHomeRun emulation** — tuliprox advertises itself as a network tuner; the media server discovers it automatically.
+
+## Setting up via M3U and XMLTV
+
+<Tabs>
+  <Tab title="Plex">
+    ### M3U playlist URL
+
+    ```text
+    http://TULIPROX_HOST:8901/get.php?username=USER&password=PASS
+    ```
+
+    Or using the REST alias:
+
+    ```text
+    http://TULIPROX_HOST:8901/m3u?username=USER&password=PASS
+    ```
+
+    ### EPG (XMLTV) URL
+
+    ```text
+    http://TULIPROX_HOST:8901/xmltv.php?username=USER&password=PASS
+    ```
+
+    ### Configuration steps
+
+    1. In Plex, go to **Settings → Live TV & DVR → Set Up Plex DVR**.
+    2. Select **Other Device** when asked for a tuner type.
+    3. Enter the M3U URL above.
+    4. When prompted for an EPG source, enter the XMLTV URL.
+    5. Complete the channel scan.
+
+    ### Recommended settings
+
+    Set `proxy: reverse` in `api-proxy.yml` so Plex receives the stream directly from tuliprox:
+
+    ```yaml api-proxy.yml
+    user:
+      - target: all_channels
+        credentials:
+          - username: plex
+            password: plex.secret
+            proxy: reverse
+            server: default
+    ```
+  </Tab>
+
+  <Tab title="Jellyfin">
+    ### M3U playlist URL
+
+    ```text
+    http://TULIPROX_HOST:8901/get.php?username=USER&password=PASS
+    ```
+
+    ### EPG (XMLTV) URL
+
+    ```text
+    http://TULIPROX_HOST:8901/xmltv.php?username=USER&password=PASS
+    ```
+
+    ### Configuration steps
+
+    1. In Jellyfin, go to **Dashboard → Live TV**.
+    2. Under **Tuner Devices** click **Add**.
+    3. Select **M3U Tuner** as the tuner type.
+    4. Enter the M3U URL.
+    5. Under **TV Guide Data Providers** click **Add**.
+    6. Select **XMLTV** and enter the XMLTV URL.
+
+    ### Recommended settings
+
+    ```yaml api-proxy.yml
+    user:
+      - target: all_channels
+        credentials:
+          - username: jellyfin
+            password: jf.secret
+            proxy: reverse
+            server: default
+    ```
+  </Tab>
+
+  <Tab title="Emby">
+    ### M3U playlist URL
+
+    ```text
+    http://TULIPROX_HOST:8901/get.php?username=USER&password=PASS
+    ```
+
+    ### EPG (XMLTV) URL
+
+    ```text
+    http://TULIPROX_HOST:8901/xmltv.php?username=USER&password=PASS
+    ```
+
+    ### Configuration steps
+
+    1. In Emby, go to **Dashboard → Live TV**.
+    2. Under **Tuner Devices** click **+**.
+    3. Select **M3U Tuner** and enter the M3U URL.
+    4. Under **TV Guide Data Providers** click **+**.
+    5. Select **XMLTV** and enter the XMLTV URL.
+
+    ### Recommended settings
+
+    ```yaml api-proxy.yml
+    user:
+      - target: all_channels
+        credentials:
+          - username: emby
+            password: emby.secret
+            proxy: reverse
+            server: default
+    ```
+  </Tab>
+</Tabs>
+
+## HDHomeRun integration path
+
+For automatic device discovery without manual URL entry, enable HDHomeRun emulation. See the [HDHomeRun integration guide](/guides/hdhomerun-integration) for the full setup.
+
+Once configured, each media server discovers the virtual tuner on the LAN:
+
+- **Plex**: Settings → Live TV & DVR → Set Up Plex DVR (picks up the device automatically)
+- **Jellyfin**: Dashboard → Live TV → Add → HDHomeRun
+- **Emby**: Dashboard → Live TV → Add Tuner → HDHomeRun → Search
+
+## STRM file output for library integration
+
+For VOD and series content, tuliprox can write `.strm` files that Plex, Jellyfin and Emby scan as local library items.
+
+<Tabs>
+  <Tab title="Plex">
+    ```yaml source.yml
+    output:
+      - type: strm
+        directory: /mnt/media/tuliprox-library
+        username: plex_user
+        style: plex
+        flat: false
+        cleanup: true
+        underscore_whitespace: false
+    ```
+
+    Point a Plex library at `/mnt/media/tuliprox-library` and set the scanner
+    to **Plex Movie** or **Plex TV Series** as appropriate.
+  </Tab>
+
+  <Tab title="Jellyfin">
+    ```yaml source.yml
+    output:
+      - type: strm
+        directory: /mnt/media/tuliprox-library
+        username: jellyfin_user
+        style: jellyfin
+        flat: false
+        cleanup: true
+    ```
+
+    Add `/mnt/media/tuliprox-library` as a media library in Jellyfin.
+  </Tab>
+
+  <Tab title="Emby">
+    ```yaml source.yml
+    output:
+      - type: strm
+        directory: /mnt/media/tuliprox-library
+        username: emby_user
+        style: emby
+        flat: false
+        cleanup: true
+    ```
+
+    Add `/mnt/media/tuliprox-library` as a media library in Emby.
+  </Tab>
+</Tabs>
+
+### STRM output options
+
+| Field | Description |
+|---|---|
+| `directory` | Output directory for `.strm` files (required) |
+| `username` | Credential username embedded in stream URLs inside `.strm` files |
+| `style` | Export style: `kodi`, `plex`, `emby` or `jellyfin` (default: `kodi`) |
+| `flat` | Write all files directly into `directory` without sub-directories |
+| `underscore_whitespace` | Replace spaces with underscores in filenames |
+| `cleanup` | Remove `.strm` files for channels no longer in the playlist |
+| `add_quality_to_filename` | Append detected quality label to the filename |
+| `strm_props` | Additional properties to write into each `.strm` file |
+| `filter` | Per-output filter expression |
+
+<Note>
+  `username` is required when using STRM output together with an `xtream` output on
+  the same target. The username must match a credential in `api-proxy.yml`.
+</Note>
+
+## Naming conventions
+
+tuliprox names `.strm` files and directories from the channel `Caption` field (the display name). Use the [mapping and templates](/guides/filtering-and-mapping) features to normalise names before they reach the STRM output, especially for series content where folder names must match what the media server expects.
+
+Enable `flat: true` to skip sub-directory creation — useful for live TV channels where you want a single flat directory of `.strm` files.

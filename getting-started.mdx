@@ -1,0 +1,185 @@
+---
+title: "Getting started"
+description: "Understand tuliprox run modes, CLI arguments, the home directory layout, and the recommended workflow for your first working setup."
+---
+
+## Run modes
+
+tuliprox has two distinct run modes:
+
+| Mode | Flag | Description |
+|------|------|-------------|
+| **CLI mode** | _(no flag)_ | Process playlists once and exit. Useful for scripting and cron-based updates. |
+| **Server mode** | `-s` / `--server` | Start the HTTP API, background scheduler, Web UI, and live proxy. This is the normal production mode. |
+
+### CLI mode
+
+In CLI mode, tuliprox reads your sources, processes the playlist, writes the output files, and exits. Use this when you want to generate static M3U files to serve with your own web server (Nginx, Apache, Caddy, etc.):
+
+```bash
+tuliprox -c config/config.yml -i config/source.yml
+```
+
+You can limit processing to a specific target by passing `-t`:
+
+```bash
+tuliprox -c config/config.yml -i config/source.yml -t my-target
+```
+
+### Server mode
+
+In server mode, tuliprox starts a long-running process that exposes the M3U, Xtream Codes, HDHomeRun, and management APIs, runs the background scheduler, and serves the Web UI:
+
+```bash
+tuliprox -s -c config/config.yml -i config/source.yml
+```
+
+This is the mode used in the Docker deployment.
+
+## CLI arguments
+
+| Flag | Short | Description |
+|------|-------|-------------|
+| `--home <HOME>` | `-H` | Override the home directory (see resolution order below) |
+| `--config-path <CONFIG_PATH>` | `-p` | Directory to search for config files |
+| `--config <CONFIG_FILE>` | `-c` | Path to `config.yml` |
+| `--source <SOURCE_FILE>` | `-i` | Path to `source.yml` |
+| `--mapping <MAPPING_FILE>` | `-m` | Path to `mapping.yml` |
+| `--template <TEMPLATE_FILE>` | `-T` | Path to `template.yml` |
+| `--target <TARGET>` | `-t` | Process only the named target (CLI mode) |
+| `--api-proxy <API_PROXY>` | `-a` | Path to `api-proxy.yml` |
+| `--server` | `-s` | Run in server mode |
+| `--log-level <LOG_LEVEL>` | `-l` | Override the log level (`error`, `warn`, `info`, `debug`, `trace`) |
+| `--genpwd` | | Generate a bcrypt password hash for the Web UI user file |
+| `--healthcheck` | | Exit 0 if the server is healthy, non-zero otherwise |
+| `--scan-library` | | Trigger a local media library scan and exit |
+| `--force-library-rescan` | | Force a full library rescan, ignoring cached metadata |
+| `--dbx` | | Open the internal database viewer for Xtream data |
+| `--dbm` | | Open the internal database viewer for M3U data |
+| `--dbms` | | Open the internal database viewer for metadata retry status |
+| `--dbe` | | Open the internal database viewer for EPG data |
+| `--dbv` | | Open the internal database viewer for target-ID mapping |
+
+<Note>
+  `--dbx`, `--dbm`, `--dbe`, `--dbv`, and `--dbms` open interactive database inspection tools for debugging. They are intended for troubleshooting, not normal operation.
+</Note>
+
+## Home directory resolution
+
+tuliprox resolves its home directory in this priority order:
+
+1. The `--home` CLI flag
+2. The `TULIPROX_HOME` environment variable
+3. The directory containing the `tuliprox` binary
+
+All relative paths in your configuration files are resolved against the home directory. In Docker deployments, the working directory `/app` acts as the home directory.
+
+## Project layout
+
+A typical tuliprox home directory looks like this:
+
+```
+/app/                    ← home directory (TULIPROX_HOME or binary location)
+├── config/
+│   ├── config.yml       ← main application config
+│   ├── source.yml       ← inputs, sources, and targets
+│   ├── api-proxy.yml    ← users and server URL definitions
+│   ├── mapping.yml      ← optional channel rename/mapping rules
+│   └── template.yml     ← optional reusable template definitions
+├── data/                ← processed playlists and working data
+│   └── backup/          ← automatic backups of previous playlist state
+├── downloads/           ← VOD downloads (if enabled)
+├── cache/               ← HTTP response cache and EPG cache
+└── web/                 ← Web UI static assets
+```
+
+### Key configuration files
+
+| File | Purpose |
+|------|---------|
+| `config/config.yml` | API server settings, scheduling, logging, reverse proxy, library config |
+| `config/source.yml` | Inputs (providers), sources, targets, filters, and output formats |
+| `config/api-proxy.yml` | Per-user credentials, connection limits, server URL announcements |
+| `mapping.yml` | Channel rename and attribute mapping rules |
+| `template.yml` | Reusable filter/mapping templates (DRY definitions) |
+
+## Utility commands
+
+### Generate a Web UI password hash
+
+The Web UI `user.txt` file stores bcrypt-hashed passwords. Generate a hash for a new password:
+
+```bash
+tuliprox --genpwd
+```
+
+Enter your desired password when prompted. Paste the resulting hash into `user.txt`.
+
+### Healthcheck
+
+tuliprox exposes a healthcheck command suitable for Docker or container orchestration:
+
+```bash
+tuliprox --healthcheck
+```
+
+This exits with code `0` if the server is responding and `1` otherwise. Wire it into your `docker-compose.yml` healthcheck block:
+
+```yaml
+healthcheck:
+  test: ["CMD", "tuliprox", "--healthcheck"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+```
+
+## Good first milestone
+
+When setting up tuliprox for the first time, keep the scope small until each step is confirmed working. Adding filtering, mapping, reverse proxy, and metadata features all at once makes it hard to isolate failures.
+
+<Steps>
+  <Step title="Add one working input">
+    Configure a single input in `source.yml` — one M3U URL or one set of Xtream Codes credentials. Start tuliprox and confirm it fetches the playlist without errors.
+  </Step>
+  <Step title="Create one target">
+    Define one target with a single output type (start with `m3u`). Confirm the output file is written to your `data/` directory.
+  </Step>
+  <Step title="Confirm playlist output">
+    Open the generated M3U file and check that channels appear as expected. Verify channel count and spot-check group names.
+  </Step>
+  <Step title="Confirm one stream plays">
+    Point VLC or another player at the playlist. Confirm at least one live stream plays from end to end before proceeding.
+  </Step>
+  <Step title="Add advanced features">
+    Only once streaming is confirmed end-to-end, layer in mapping rules, filters, reverse proxy configuration, and metadata enrichment. Adding these one at a time keeps failures easy to diagnose.
+  </Step>
+</Steps>
+
+<Tip>
+  Provider-specific issues (wrong credentials, URL format, connection limits) are much easier to diagnose when your tuliprox configuration is minimal. Get a bare pipeline working first.
+</Tip>
+
+## Recommended reading order
+
+Once you have a working baseline, explore the rest of the documentation in this order:
+
+<CardGroup cols={2}>
+  <Card title="Config reference" icon="sliders" href="/configuration/main-config">
+    Full reference for `config.yml` — API server, scheduling, logging, and reverse proxy settings.
+  </Card>
+  <Card title="Sources and targets" icon="database" href="/configuration/sources-and-targets">
+    Define inputs, configure multiple providers, and shape outputs with filters.
+  </Card>
+  <Card title="API proxy" icon="shield" href="/configuration/api-proxy">
+    Configure per-user credentials, connection limits, and published server URLs.
+  </Card>
+  <Card title="Streaming and proxy" icon="arrow-right-arrow-left" href="/features/streaming-and-proxy">
+    Understand how tuliprox handles live stream proxying, sharing, and failover.
+  </Card>
+  <Card title="Mapping and templates" icon="code" href="/configuration/mapping-and-templates">
+    Rename channels, rewrite attributes, and define reusable template expressions.
+  </Card>
+  <Card title="Examples and recipes" icon="book" href="/guides/examples-and-recipes">
+    Copy-paste recipes for common setups and real-world filtering patterns.
+  </Card>
+</CardGroup>

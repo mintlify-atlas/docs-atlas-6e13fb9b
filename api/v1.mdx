@@ -1,0 +1,549 @@
+---
+title: "Management API (v1)"
+description: "REST API for configuration, playlist management, and user administration. Used by the web UI and automation scripts."
+---
+
+The management API is mounted at `/api/v1/` (or `/<path>/api/v1/` if a URL path prefix is configured). All endpoints except the public playlist resource endpoint require a valid **admin JWT bearer token**.
+
+```
+Authorization: Bearer <jwt-token>
+```
+
+<Note>
+  Admin endpoints are protected by the `validator_admin` middleware. If `web_auth_enabled` is `false` in your tuliprox setup, the middleware is bypassed and no token is required.
+</Note>
+
+---
+
+## System
+
+### Server status
+
+```
+GET /api/v1/status
+```
+
+Returns a JSON object describing the current server state.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8901/api/v1/status
+```
+
+<Expandable title="Response fields">
+  <ResponseField name="status" type="string">Always `"ok"` when the server is running.</ResponseField>
+  <ResponseField name="version" type="string">tuliprox version string.</ResponseField>
+  <ResponseField name="build_time" type="string">Build timestamp.</ResponseField>
+  <ResponseField name="server_time" type="string">Current server time.</ResponseField>
+  <ResponseField name="active_users" type="number">Number of users with active sessions.</ResponseField>
+  <ResponseField name="active_user_connections" type="number">Total number of active connections across all users.</ResponseField>
+  <ResponseField name="active_provider_connections" type="object">Map of provider name to active connection count.</ResponseField>
+  <ResponseField name="active_user_streams" type="array">List of active stream details.</ResponseField>
+  <ResponseField name="cache" type="string | null">Cache size description, or `null` if no cache is configured.</ResponseField>
+</Expandable>
+
+---
+
+### Active streams
+
+```
+GET /api/v1/streams
+```
+
+Returns the list of currently active streams.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8901/api/v1/streams
+```
+
+---
+
+### GeoIP database update
+
+```
+GET /api/v1/geoip/update
+```
+
+Triggers an update of the GeoIP database used for connection geo-filtering. Returns `200 OK` on success, `400 Bad Request` if GeoIP is disabled or the download failed.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8901/api/v1/geoip/update
+```
+
+---
+
+### IP info
+
+```
+GET /api/v1/ipinfo
+```
+
+Returns the server's detected public IPv4 and IPv6 addresses. Requires `ipcheck` to be configured in `config.yml`.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8901/api/v1/ipinfo
+```
+
+<Expandable title="Response fields">
+  <ResponseField name="ipv4" type="string | null">Detected public IPv4 address.</ResponseField>
+  <ResponseField name="ipv6" type="string | null">Detected public IPv6 address.</ResponseField>
+</Expandable>
+
+---
+
+## Configuration
+
+### Get full configuration
+
+```
+GET /api/v1/config
+```
+
+Returns the current `config.yml`, `sources.yml`, and `api-proxy.yml` contents merged into a single JSON object. Response headers include revision hashes for each file:
+
+| Header | Description |
+|---|---|
+| `x-config-main-revision` | BLAKE3 hash of `config.yml` |
+| `x-config-sources-revision` | BLAKE3 hash of `sources.yml` |
+| `x-config-api-proxy-revision` | BLAKE3 hash of `api-proxy.yml` |
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8901/api/v1/config
+```
+
+---
+
+### Save main config
+
+```
+POST /api/v1/config/main
+```
+
+Saves a new `config.yml`. Requires the `If-Match` header to contain the current revision hash from `x-config-main-revision`.
+
+**Request body:** JSON `ConfigDto` object.
+
+**Headers:**
+
+| Header | Description |
+|---|---|
+| `Content-Type` | `application/json` |
+| `If-Match` | Current `x-config-main-revision` value |
+
+**Responses:**
+
+| Status | Meaning |
+|---|---|
+| `200 OK` | Saved successfully. New revision in `x-config-main-revision` response header. |
+| `400 Bad Request` | Validation failed. |
+| `409 Conflict` | Config changed on server since you last fetched it. Reload and retry. |
+| `428 Precondition Required` | `If-Match` header missing. |
+
+<Warning>
+  Always fetch the config first, record the revision header, then send that revision in `If-Match` when saving. This prevents overwriting concurrent changes.
+</Warning>
+
+---
+
+### Save sources config
+
+```
+POST /api/v1/config/sources
+```
+
+Saves a new `sources.yml`. Same `If-Match` / `x-config-sources-revision` revision-check protocol as `config/main`.
+
+**Request body:** JSON `SourcesConfigDto` object.
+
+---
+
+### Get API proxy config
+
+```
+GET /api/v1/config/apiproxy
+```
+
+Returns the current `api-proxy.yml` content (excluding the `user` list). Response includes the `x-config-api-proxy-revision` header.
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" http://localhost:8901/api/v1/config/apiproxy
+```
+
+---
+
+### Save API proxy config
+
+```
+PUT /api/v1/config/apiproxy
+```
+
+Saves updated server and global settings from `api-proxy.yml`. Uses the same `If-Match` / `x-config-api-proxy-revision` revision-check protocol.
+
+**Request body:** JSON `ApiProxyConfigDto` object (without the `user` list — use the user endpoints below to manage users).
+
+---
+
+### Get batch content for an input
+
+```
+GET /api/v1/config/batchContent/{input_id}
+```
+
+Downloads the raw batch CSV file for a given input. Returns `text/csv`.
+
+<ParamField path="input_id" type="number" required>
+  The numeric input ID.
+</ParamField>
+
+---
+
+### Test Xtream provider login
+
+```
+POST /api/v1/config/xtream/login-info
+```
+
+Attempts to log in to an Xtream Codes provider and returns the login response. Useful for verifying provider credentials before saving them in `sources.yml`.
+
+**Request body:**
+
+```json
+{
+  "url": "http://provider.example.com",
+  "username": "provideruser",
+  "password": "providerpass"
+}
+```
+
+---
+
+## File downloads
+
+### Queue a file download
+
+```
+POST /api/v1/file/download
+```
+
+Queues a background file download task.
+
+---
+
+### Get download status
+
+```
+GET /api/v1/file/download/info
+```
+
+Returns the status of any queued or in-progress file downloads.
+
+---
+
+## Playlist management
+
+### Trigger playlist update
+
+```
+POST /api/v1/playlist/update
+```
+
+Triggers a manual playlist refresh. Deduplicates rapid calls — if an update is already pending, the response is still `202 Accepted` but no duplicate run is queued.
+
+**Request body:** JSON array of target name strings. Send an empty array `[]` to update all targets.
+
+```bash
+curl -X POST http://localhost:8901/api/v1/playlist/update \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '["my_target"]'
+```
+
+| Status | Meaning |
+|---|---|
+| `202 Accepted` | Update queued or already pending. |
+| `400 Bad Request` | Invalid target name(s). |
+| `503 Service Unavailable` | Server is shutting down. |
+
+---
+
+### Get live channels
+
+```
+POST /api/v1/playlist/live
+```
+
+Returns the live channel playlist for the specified source. Used by the web UI playlist browser.
+
+**Request body:** A `PlaylistRequest` object:
+
+```json
+{ "Target": 1 }
+```
+
+or for an input:
+
+```json
+{ "Input": 2 }
+```
+
+or for a custom Xtream provider:
+
+```json
+{
+  "CustomXtream": {
+    "url": "http://provider.example.com",
+    "username": "user",
+    "password": "pass"
+  }
+}
+```
+
+or for a custom M3U URL:
+
+```json
+{ "CustomM3u": { "url": "http://example.com/playlist.m3u" } }
+```
+
+---
+
+### Get VOD
+
+```
+POST /api/v1/playlist/vod
+```
+
+Same request body as `/playlist/live`. Returns VOD items.
+
+---
+
+### Get series
+
+```
+POST /api/v1/playlist/series
+```
+
+Same request body as `/playlist/live`. Returns series items.
+
+---
+
+### Get series info
+
+```
+POST /api/v1/playlist/series_info/{virtual_id}/{provider_id}
+```
+
+Returns detailed info for a series item.
+
+<ParamField path="virtual_id" type="string" required>
+  The virtual stream ID of the series.
+</ParamField>
+
+<ParamField path="provider_id" type="string" required>
+  The provider stream ID.
+</ParamField>
+
+**Request body:** A `PlaylistRequest` with `Target` variant.
+
+---
+
+### Get series episode item
+
+```
+POST /api/v1/playlist/series/episode/{virtual_id}
+```
+
+Returns a single series episode item.
+
+<ParamField path="virtual_id" type="string" required>
+  The virtual stream ID of the episode.
+</ParamField>
+
+**Request body:** A `PlaylistRequest` with `Target` variant.
+
+---
+
+### Get EPG for playlist
+
+```
+POST /api/v1/playlist/epg
+```
+
+Returns the EPG data for a target or custom source. Used by the web UI EPG viewer.
+
+**Request body:** A `PlaylistEpgRequest` object:
+
+```json
+{ "Target": 1 }
+```
+
+or for a custom URL:
+
+```json
+{ "Custom": "http://example.com/epg.xml" }
+```
+
+---
+
+### Get web player URL
+
+```
+POST /api/v1/playlist/webplayer
+```
+
+Generates a short-lived stream URL for the built-in web player.
+
+**Request body:**
+
+```json
+{
+  "target_id": 1,
+  "cluster": "live",
+  "virtual_id": 12345
+}
+```
+
+Returns a plain-text URL string using a JWT access token valid for 30 seconds.
+
+---
+
+### Public: playlist resource proxy
+
+```
+GET /api/v1/playlist/resource/{resource}
+```
+
+Proxy for obfuscated resource URLs (e.g., cover images) embedded in web UI playlist responses. This endpoint is **public** — no authentication required.
+
+<ParamField path="resource" type="string" required>
+  Obfuscated resource identifier generated internally by tuliprox.
+</ParamField>
+
+---
+
+## User management
+
+These endpoints manage proxy users in `api-proxy.yml` (or the user database when `use_user_db: true`).
+
+### Create a user
+
+```
+POST /api/v1/user/{target}
+```
+
+Creates a new user credential under the specified target.
+
+<ParamField path="target" type="string" required>
+  The target name (as defined in `sources.yml`) to associate the user with.
+</ParamField>
+
+**Request body:** JSON `ProxyUserCredentialsDto` object:
+
+```json
+{
+  "username": "newuser",
+  "password": "newpass",
+  "token": "optional-token",
+  "proxy": "reverse",
+  "server": "default",
+  "max_connections": 2,
+  "status": "Active",
+  "exp_date": null
+}
+```
+
+| Status | Meaning |
+|---|---|
+| `200 OK` | User created. |
+| `400 Bad Request` | Duplicate username, duplicate token, or validation error. |
+
+---
+
+### Update a user
+
+```
+PUT /api/v1/user/{target}
+```
+
+Updates an existing user credential. The `username` in the request body identifies the user to update. If the `target` path parameter differs from the user's current target, the user is moved to the new target.
+
+**Request body:** Same `ProxyUserCredentialsDto` structure as create.
+
+| Status | Meaning |
+|---|---|
+| `200 OK` | User updated. |
+| `400 Bad Request` | User not found, duplicate token, or validation error. |
+
+---
+
+### Delete a user
+
+```
+DELETE /api/v1/user/{target}/{username}
+```
+
+Deletes a user credential.
+
+<ParamField path="target" type="string" required>
+  The target the user belongs to.
+</ParamField>
+
+<ParamField path="username" type="string" required>
+  The username to delete.
+</ParamField>
+
+```bash
+curl -X DELETE \
+  -H "Authorization: Bearer $TOKEN" \
+  http://localhost:8901/api/v1/user/my_target/alice
+```
+
+| Status | Meaning |
+|---|---|
+| `200 OK` | User deleted. |
+| `400 Bad Request` | User not found in the specified target. |
+
+---
+
+## User self-service API
+
+These endpoints are for authenticated end-users (not admins). They use a **user JWT bearer token** rather than the admin token, and are enabled only when `user_ui_enabled` is `true` in `config.yml`.
+
+### Get playlist categories
+
+```
+GET /api/v1/user/playlist/categories
+```
+
+Returns the category groups available to the authenticated user, split by output type.
+
+<Expandable title="Response structure">
+  <ResponseField name="xtream" type="object">
+    <ResponseField name="live" type="array">List of live category names.</ResponseField>
+    <ResponseField name="vod" type="array">List of VOD category names.</ResponseField>
+    <ResponseField name="series" type="array">List of series category names.</ResponseField>
+  </ResponseField>
+  <ResponseField name="m3u" type="object">
+    <ResponseField name="live" type="array">List of group names from the M3U playlist.</ResponseField>
+  </ResponseField>
+</Expandable>
+
+---
+
+### Get user bouquet
+
+```
+GET /api/v1/user/playlist/bouquet
+```
+
+Returns the user's saved channel bouquet (favourite/selected channels) for both Xtream and M3U output types.
+
+---
+
+### Save user bouquet
+
+```
+POST /api/v1/user/playlist/bouquet
+```
+
+Saves the user's channel bouquet.
+
+**Request body:** JSON `PlaylistBouquetDto` object.

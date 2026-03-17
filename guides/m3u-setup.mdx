@@ -1,0 +1,182 @@
+---
+title: "M3U playlist setup"
+description: "Configure an M3U provider as an input, integrate EPG, and publish an M3U output."
+---
+
+M3U is the universal playlist format supported by virtually every IPTV provider and media player. This guide shows you how to load M3U playlists, attach EPG sources and publish processed playlists to clients.
+
+## Step 1: Define an M3U input
+
+<Steps>
+  <Step title="Add the input to source.yml">
+    ```yaml source.yml
+    inputs:
+      - type: m3u
+        name: my_m3u_provider
+        url: http://provider.example/playlist.m3u
+    ```
+
+    Use `file://` to load a local playlist file:
+
+    ```yaml source.yml
+    inputs:
+      - type: m3u
+        name: local_list
+        url: file:///home/tuliprox/playlists/channels.m3u
+    ```
+  </Step>
+
+  <Step title="Create a source and target">
+    Wire the input to a target and set the output type to `m3u`:
+
+    ```yaml source.yml
+    templates:
+      - name: ALL_CHAN
+        value: 'Group ~ ".*"'
+    inputs:
+      - type: m3u
+        name: my_m3u_provider
+        url: http://provider.example/playlist.m3u
+    sources:
+      - inputs:
+          - my_m3u_provider
+        targets:
+          - name: all_channels
+            output:
+              - type: m3u
+            filter: "!ALL_CHAN!"
+    ```
+  </Step>
+
+  <Step title="Configure api-proxy.yml">
+    ```yaml api-proxy.yml
+    server:
+      - name: default
+        protocol: http
+        host: 192.168.1.41
+        port: 8901
+        timezone: Europe/Berlin
+        message: Welcome to tuliprox
+    user:
+      - target: all_channels
+        credentials:
+          - username: user1
+            password: secret
+            proxy: redirect
+            server: default
+    ```
+  </Step>
+</Steps>
+
+The M3U playlist is then available at:
+
+```text
+http://host:port/get.php?username=user1&password=secret
+```
+
+Or using the REST-friendly alias:
+
+```text
+http://host:port/m3u?username=user1&password=secret
+```
+
+## EPG (XMLTV) integration
+
+Attach one or more EPG sources to the input using the `epg` block:
+
+```yaml source.yml
+inputs:
+  - type: m3u
+    name: my_m3u_provider
+    url: http://provider.example/playlist.m3u
+    epg:
+      sources:
+        - url: http://provider.example/epg.xml
+          priority: -1
+        - url: auto
+          priority: -2
+          logo_override: true
+      smart_match:
+        enabled: true
+        fuzzy_matching: true
+        match_threshold: 80
+        best_match_threshold: 99
+```
+
+`url: auto` tells tuliprox to use the EPG URL embedded in the M3U playlist itself, if present.
+
+Clients retrieve the EPG at:
+
+```text
+http://host:port/xmltv.php?username=user1&password=secret
+```
+
+## M3U output options
+
+| Field | Description |
+|---|---|
+| `filename` | Custom filename for the generated M3U file |
+| `include_type_in_url` | Append the content type to stream URLs |
+| `mask_redirect_url` | Mask the provider URL in redirect responses |
+| `filter` | Additional per-output filter expression |
+
+Example:
+
+```yaml
+output:
+  - type: m3u
+    filename: my_channels.m3u
+    include_type_in_url: true
+```
+
+## Batch M3U sources
+
+Use `m3u_batch` to load many provider URLs from a CSV file:
+
+```yaml source.yml
+inputs:
+  - type: m3u_batch
+    name: batch_providers
+    url: batch://providers.csv
+```
+
+The CSV file must have these columns:
+
+| Column | Description |
+|---|---|
+| `url` | Provider playlist URL |
+| `max_connections` | Maximum concurrent connections |
+| `priority` | Failover priority (lower = higher priority) |
+
+Alternatively, use an `m3u` input with a `batch://` URL — tuliprox treats it the same as `m3u_batch`.
+
+## Common issues
+
+<AccordionGroup>
+  <Accordion title="Playlist is empty after update">
+    Verify the URL is reachable from the tuliprox host:
+
+    ```bash
+    curl -I "http://provider.example/playlist.m3u"
+    ```
+
+    For `file://` URLs confirm the path exists and tuliprox has read permission.
+  </Accordion>
+
+  <Accordion title="EPG not populating">
+    EPG matching depends on the `tvg-id` attribute in the M3U entries matching
+    channel IDs in the XMLTV data. Enable `smart_match` with `fuzzy_matching`
+    to handle minor name differences.
+  </Accordion>
+
+  <Accordion title="Groups or channel names look wrong">
+    M3U attribute parsing reads `group-title` and `tvg-name` from `#EXTINF` lines.
+    Check the raw playlist to confirm those attributes are present. Use the
+    rename and mapping features to normalise names after import.
+  </Accordion>
+
+  <Accordion title="Client requests timeout on large playlists">
+    For very large playlists consider enabling `disk_based_processing: true`
+    in `config.yml` to reduce peak memory usage during updates.
+  </Accordion>
+</AccordionGroup>

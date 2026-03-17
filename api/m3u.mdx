@@ -1,0 +1,147 @@
+---
+title: "M3U API"
+description: "Download M3U playlists and stream live, VOD, and series content via the M3U API."
+---
+
+The M3U API serves processed playlists and proxies or redirects stream URLs to media players that understand the M3U/M3U8 format.
+
+## Playlist endpoints
+
+All three paths are equivalent — use whichever your player prefers.
+
+| Method | Path |
+|---|---|
+| `GET` / `POST` | `/get.php` |
+| `GET` / `POST` | `/m3u` |
+| `GET` / `POST` | `/apiget` |
+
+### Parameters
+
+<ParamField query="username" type="string" required>
+  The username defined in `api-proxy.yml`.
+</ParamField>
+
+<ParamField query="password" type="string" required>
+  The password for the user. Can be replaced by `token`.
+</ParamField>
+
+<ParamField query="token" type="string">
+  Token credential. Accepted in place of `username` + `password`.
+</ParamField>
+
+<ParamField query="type" type="string">
+  Output format. Set to `m3u_plus` to receive an M3U8 file with a `Content-Disposition: attachment; filename="playlist.m3u"` header. Omit for plain M3U text output.
+</ParamField>
+
+### Response
+
+Returns a streaming `text/plain` body containing the processed M3U playlist. Each entry is rewritten according to your target's filter and mapping rules.
+
+When `type=m3u_plus` is used, the response includes:
+
+```
+Content-Type: text/plain; charset=utf-8
+Content-Disposition: attachment; filename="playlist.m3u"
+```
+
+### Examples
+
+<Tabs>
+  <Tab title="Download playlist">
+    ```bash
+    curl "http://localhost:8901/get.php?username=alice&password=s3cr3t"
+    ```
+  </Tab>
+  <Tab title="M3U Plus format">
+    ```bash
+    curl "http://localhost:8901/get.php?username=alice&password=s3cr3t&type=m3u_plus" \
+      -o playlist.m3u
+    ```
+  </Tab>
+  <Tab title="Token auth">
+    ```bash
+    curl "http://localhost:8901/get.php?token=my-unique-token"
+    ```
+  </Tab>
+  <Tab title="POST form">
+    ```bash
+    curl -X POST http://localhost:8901/get.php \
+      -d "username=alice&password=s3cr3t&type=m3u_plus"
+    ```
+  </Tab>
+</Tabs>
+
+---
+
+## Stream endpoints
+
+Stream URLs embedded in the M3U playlist point to these endpoints. Media players follow them automatically when a user clicks a channel.
+
+### Live streams (alt path)
+
+```
+GET /m3u-stream/{username}/{password}/{stream_id}
+```
+
+### Live streams
+
+```
+GET /m3u-stream/live/{username}/{password}/{stream_id}
+```
+
+### VOD / movies
+
+```
+GET /m3u-stream/movie/{username}/{password}/{stream_id}
+```
+
+### Series
+
+```
+GET /m3u-stream/series/{username}/{password}/{stream_id}
+```
+
+<ParamField path="username" type="string" required>
+  The user's username.
+</ParamField>
+
+<ParamField path="password" type="string" required>
+  The user's password.
+</ParamField>
+
+<ParamField path="stream_id" type="string" required>
+  The virtual stream ID assigned by tuliprox. Optionally includes a file extension suffix (e.g., `12345.ts`).
+</ParamField>
+
+<Note>
+  You do not call these endpoints directly. They are embedded in the playlist entries returned by `/get.php` and followed by media players.
+</Note>
+
+---
+
+## Resource endpoint
+
+Serves associated resources (e.g., poster images, logos) for M3U playlist items.
+
+```
+GET /resource/m3u/{username}/{password}/{stream_id}/{resource}
+```
+
+<ParamField path="resource" type="string" required>
+  The resource field name on the playlist item (e.g., `logo`, `poster`).
+</ParamField>
+
+Depending on the user's `proxy` mode, tuliprox either proxies the resource through itself or redirects to the provider's URL.
+
+---
+
+## Connection limits and errors
+
+| Condition | Behaviour |
+|---|---|
+| Invalid credentials | HTTP `403` (or the configured `auth_error_status`) |
+| Target has no M3U output | HTTP `400 Bad Request` |
+| Stream ID not found | HTTP `404 Not Found` |
+| User connection limit exhausted | Custom error video stream (if configured) |
+| Provider connection limit exhausted | Custom error video stream (if configured) |
+| User account expired | Custom error video stream (if configured) |

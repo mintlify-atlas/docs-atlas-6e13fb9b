@@ -1,0 +1,57 @@
+---
+title: "Features overview"
+description: "A high-level tour of everything tuliprox can do — from playlist processing to live stream proxying, local media libraries, and operational monitoring."
+---
+
+tuliprox is an IPTV proxy and playlist processor. It sits between your IPTV providers and your clients, giving you full control over how content is fetched, transformed, and delivered.
+
+## Feature areas
+
+<CardGroup cols={2}>
+  <Card title="Playlist processing" icon="list-filter" href="/features/playlist-processing">
+    Filter, rename, map, sort, and merge playlists from multiple providers into curated outputs. Supports M3U, Xtream, HDHomeRun, and STRM targets.
+  </Card>
+  <Card title="Streaming and proxy" icon="server" href="/features/streaming-and-proxy">
+    Reverse-proxy live streams with connection limits, priority-based preemption, HLS session reservation, and custom fallback videos.
+  </Card>
+  <Card title="Local media library" icon="folder-open" href="/features/local-media-library">
+    Scan local directories, enrich metadata via TMDB, probe streams with ffprobe, and expose your library through Xtream or M3U outputs.
+  </Card>
+  <Card title="Monitoring and alerts" icon="bell" href="/features/monitoring-and-alerts">
+    Send notifications to Telegram, Discord, Pushover, or any REST endpoint. Track playlist group changes and watch specific groups for real-time alerts.
+  </Card>
+</CardGroup>
+
+## Input formats
+
+tuliprox can ingest content from the following source types:
+
+| Input type | Description |
+|---|---|
+| `m3u` | Standard M3U / M3U8 playlist URL or local file |
+| `xtream` | Xtream Codes API (live, VOD, series) |
+| `library` | Local media directory scanned by tuliprox |
+| `m3u_batch` | Multiple M3U sources loaded from a CSV file |
+| `xtream_batch` | Multiple Xtream accounts loaded from a CSV file |
+
+## Output formats
+
+tuliprox publishes processed content in these target formats:
+
+| Output type | Description |
+|---|---|
+| `m3u` | Standard M3U playlist for any IPTV player |
+| `xtream` | Xtream Codes-compatible API for players that expect panel APIs |
+| `hdhomerun` | HDHomeRun emulation for Plex, Jellyfin, Emby, and TVHeadend |
+| `strm` | STRM stub files for media-server-oriented workflows |
+
+## Operational features
+
+Beyond content transformation, tuliprox includes runtime capabilities for day-to-day operation:
+
+- **Scheduled updates** — cron-based playlist refreshes, library scans, and GeoIP database updates
+- **Hot config reload** — mapping files and API proxy configuration reload without a restart
+- **Provider failover** — automatic rotation across provider URLs on network errors and HTTP 5xx/4xx responses
+- **DNS-aware rotation** — resolves provider hostnames to multiple IPs and rotates on connection failure
+- **Web UI** — built-in interface for monitoring streams, users, and playlist state
+- **User access control** — connection limits, expiry checking, and per-user priority

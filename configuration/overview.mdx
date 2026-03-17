@@ -1,0 +1,90 @@
+---
+title: "Configuration overview"
+description: "Understand the four configuration files that drive Tuliprox and how they fit together."
+---
+
+Tuliprox is driven by a small set of focused files rather than one monolithic configuration document. Each file has a clear responsibility, so you only touch what you need.
+
+## The four configuration files
+
+| File | Purpose |
+|------|---------|
+| `config.yml` | Server runtime, storage, reverse proxy, scheduling, metadata, Web UI |
+| `source.yml` | Upstream inputs, provider definitions, aliases, output targets |
+| `api-proxy.yml` | Advertised server URLs, user credentials, proxy mode |
+| `mapping.yml` | Content shaping rules, reusable templates, renaming DSL |
+
+## Home directory resolution
+
+Tuliprox resolves its **home directory** — the base for all relative paths — in this order:
+
+<Steps>
+  <Step title="--home flag">
+    If you pass `--home /path/to/config` on the command line, that directory is used.
+  </Step>
+  <Step title="TULIPROX_HOME environment variable">
+    If `--home` is not set, Tuliprox checks the `TULIPROX_HOME` environment variable.
+  </Step>
+  <Step title="Binary directory">
+    If neither is set, the directory containing the `tuliprox` binary is used as the home directory.
+  </Step>
+</Steps>
+
+All relative paths in `config.yml` (such as `storage_dir`, `mapping_path`, `template_path`, `web_root`) are resolved against this home directory.
+
+## Default directory layout
+
+```text
+/home/tuliprox/          ← home directory
+├── config.yml           ← main configuration
+├── source.yml           ← inputs and targets
+├── api-proxy.yml        ← server and user definitions
+├── mapping.yml          ← mapping rules (optional)
+├── template.yml         ← reusable templates (optional)
+└── data/                ← storage_dir (persisted playlists, DBs, metadata)
+```
+
+## Practical split
+
+**Use `config.yml` for:**
+- How the application runs (ports, workers, timeouts)
+- Where it stores data
+- How it serves users and streams
+
+**Use `source.yml` for:**
+- What data comes in from providers
+- How providers are grouped into sources
+- What outputs (targets) are exposed to clients
+
+**Use `mapping.yml` / `template.yml` for:**
+- Content shaping and renaming
+- Repeated logic extracted into reusable templates
+- Filtering expressions shared across targets
+
+## Recommended reading order for new users
+
+1. `config.yml` — understand runtime and server settings first
+2. `source.yml` — define where your content comes from
+3. Targets — decide what each client group sees
+4. Reverse proxy settings — configure stream delivery
+5. Mapping and templates — shape content as needed
+
+## Configuration pages
+
+<CardGroup cols={2}>
+  <Card title="Main configuration" icon="gear" href="/configuration/main-config">
+    All `config.yml` fields: API server, storage, messaging, metadata, scheduling, Web UI, and more.
+  </Card>
+  <Card title="Sources and targets" icon="database" href="/configuration/sources-and-targets">
+    Define upstream inputs, provider options, and the output targets Tuliprox exposes to clients.
+  </Card>
+  <Card title="API proxy" icon="shield" href="/configuration/api-proxy">
+    Configure advertised server URLs and user credentials in `api-proxy.yml`.
+  </Card>
+  <Card title="Mapping and templates" icon="wand-magic-sparkles" href="/configuration/mapping-and-templates">
+    Reusable templates and the mapper DSL for renaming, filtering, and grouping content.
+  </Card>
+  <Card title="Scheduled tasks" icon="clock" href="/configuration/schedules">
+    Cron-based scheduling for playlist updates, library scans, and GeoIP updates.
+  </Card>
+</CardGroup>

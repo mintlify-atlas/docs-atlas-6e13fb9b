@@ -1,0 +1,219 @@
+---
+title: "Troubleshooting"
+description: "Diagnose and resolve common tuliprox problems."
+---
+
+## Debug tools
+
+Before diving into specific issues, enable detailed logging to get more information:
+
+```yaml
+log:
+  log_level: debug
+  sanitize_sensitive_info: false
+  log_active_user: true
+```
+
+<Warning>
+  Set `sanitize_sensitive_info: false` only temporarily during debugging. It will expose provider credentials in log output. Re-enable it before returning to production.
+</Warning>
+
+You can also override the log level at startup without editing config:
+
+```bash
+tuliprox -s -l debug
+```
+
+For per-module verbosity:
+
+```bash
+tuliprox -s -l hyper_util::client::legacy::connect=error,tuliprox=debug
+```
+
+## Common issues
+
+<AccordionGroup>
+  <Accordion title="Streams not loading / 404 errors">
+    **Symptoms**: Channels appear in the playlist but fail to play; the player shows a 404 or "stream not found" error.
+
+    **Check the following**:
+
+    1. Confirm the upstream provider URL is reachable from the tuliprox host.
+    2. Check that the target output is configured with the correct user credentials in `api-proxy.yml`.
+    3. Verify `storage_dir` is writable and that the initial playlist update ran (`update_on_boot: true` or a manual update).
+    4. Use `--dbm` or `--dbx` to inspect the stored playlist and confirm the channel is present in the database.
+
+    ```bash
+    tuliprox --dbm
+    tuliprox --dbx
+    ```
+
+    5. Check logs for `404` or `410` responses from the upstream — these trigger provider failover if multiple URLs are configured.
+  </Accordion>
+
+  <Accordion title="Provider connection limits being hit">
+    **Symptoms**: Some users receive a fallback "connections exhausted" video or HTTP `503`; new streams fail while others are active.
+
+    **Explanation**: Each provider account has a maximum number of simultaneous streams. tuliprox enforces this limit and returns a custom fallback response when it is reached.
+
+    **Solutions**:
+
+    - Enable stream sharing so multiple viewers attach to a single upstream connection:
+
+      ```yaml
+      reverse_proxy:
+        stream:
+          share_live_streams: true
+      ```
+
+    - Place a custom fallback video at:
+
+      ```
+      <custom_stream_response_path>/provider_connections_exhausted.ts
+      ```
+
+    - Add a second provider URL or account and configure failover rotation.
+    - Review the Web UI stream table to identify which users are holding connections open.
+  </Accordion>
+
+  <Accordion title="VLC seek problems (grace period tuning)">
+    **Symptoms**: Seeking in VLC causes the stream to stall or fail; the player reconnects but the provider refuses the new connection because the previous one has not closed yet.
+
+    **Explanation**: VLC and similar clients issue rapid reconnects during seeks. The provider may still count the previous connection as active, triggering a connection-limit error.
+
+    **Solution**: Increase the grace period so tuliprox waits for stale connections to close before re-checking limits:
+
+    ```yaml
+    reverse_proxy:
+      stream:
+        grace_period_millis: 2000
+        grace_period_timeout_secs: 5
+    ```
+
+    - `grace_period_millis` — how long to wait (in milliseconds) before re-evaluating the connection limit after a reconnect
+    - `grace_period_timeout_secs` — how long to hold the new connection attempt while waiting for the old one to clear
+    - `grace_period_hold_stream` — if `true`, tuliprox delays sending any media data until the grace decision is made
+  </Accordion>
+
+  <Accordion title="HLS session issues">
+    **Symptoms**: HLS streams stall after a few segments; the player reconnects and gets a 503 or connection-limit error on the next segment request.
+
+    **Explanation**: HLS clients repeatedly connect and disconnect for each playlist and segment fetch. tuliprox maintains an account reservation between requests rather than holding a real provider slot open. If `hls_session_ttl_secs` is too short, the reservation expires between segment requests.
+
+    **Solution**: Increase the session TTL:
+
+    ```yaml
+    reverse_proxy:
+      stream:
+        hls_session_ttl_secs: 30
+    ```
+
+    Set this higher than your HLS target segment duration plus any network latency.
+  </Accordion>
+
+  <Accordion title="SSL certificate errors">
+    **Symptoms**: Streams or playlist fetches fail with TLS handshake errors or certificate validation failures in the log.
+
+    **Solution**: Enable acceptance of self-signed or untrusted certificates:
+
+    ```yaml
+    accept_unsecure_ssl_certificates: true
+    ```
+
+    <Warning>
+      Only enable this if you trust the upstream provider and understand the security implications. It disables certificate chain validation for all outgoing requests.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Authentication failures (401 / 403)">
+    **Symptoms**: Streams fail with HTTP `401 Unauthorized` or `403 Forbidden`; failover to the next provider URL does not occur.
+
+    **Explanation**: tuliprox does **not** trigger provider failover for `401` or `403` responses. These status codes indicate a credential problem, not a transient server error. Failing over to another URL with the same credentials will produce the same result.
+
+    **Solutions**:
+
+    - Verify the provider username, password, and base URL in `source.yml` are correct.
+    - Check whether the provider account is active and not expired.
+    - Confirm that `user_access_control` is not blocking the request due to an expired or invalid user in `api-proxy.yml`.
+    - Check the tuliprox log for the full request URL to confirm it is being constructed correctly.
+  </Accordion>
+
+  <Accordion title="Missing channels after a playlist update">
+    **Symptoms**: Channels that were previously available no longer appear after a scheduled or manual playlist update.
+
+    **Check the following**:
+
+    1. The upstream provider may have removed or renamed the channels. Check the source M3U or Xtream API directly.
+    2. Review your mapping and filter rules — a filter that previously passed the channel may no longer match after a rename.
+    3. If `watch` notifications are configured, check the alert that was sent for group-change details.
+    4. Use `--dbm` or `--dbx` to inspect the current database and confirm whether the channel entry exists:
+
+       ```bash
+       tuliprox --dbm
+       ```
+
+    5. If the data directory is corrupted, clear `storage_dir` and trigger a fresh playlist update. tuliprox will re-fetch and rebuild all databases.
+
+    <Warning>
+      Clearing `storage_dir` removes all persisted playlists and virtual IDs. Plex, Jellyfin, and other clients may need to re-scan their libraries.
+    </Warning>
+  </Accordion>
+
+  <Accordion title="Docker volume permission errors">
+    **Symptoms**: tuliprox fails to start or write files; logs show `permission denied` errors for paths under `config/`, `data/`, or `cache/`.
+
+    **Solution**: Ensure the host directories are owned by or readable and writable by the user the container runs as. For rootless containers, match the UID:
+
+    ```bash
+    chown -R 1000:1000 /home/tuliprox/config
+    chown -R 1000:1000 /home/tuliprox/data
+    chown -R 1000:1000 /home/tuliprox/cache
+    ```
+
+    Alternatively, add a `user:` directive to your `docker-compose.yml`:
+
+    ```yaml
+    services:
+      tuliprox:
+        user: "1000:1000"
+    ```
+
+    Confirm the mount paths match the `storage_dir`, `backup_dir`, and `web_root` values in your `config.yml`.
+  </Accordion>
+
+  <Accordion title="Web UI not loading">
+    **Symptoms**: Navigating to `http://host:8901` returns a blank page, 404, or connection refused.
+
+    **Check the following**:
+
+    1. Confirm `web_ui.enabled: true` is set in `config.yml`.
+    2. Verify `api.web_root` points to the correct directory containing the frontend assets.
+    3. Ensure tuliprox is running in server mode (`-s` flag).
+    4. Check that the port in `api.port` matches what you are accessing in the browser.
+    5. If authentication is enabled, confirm the credentials are correct. Generate a new password hash with:
+
+       ```bash
+       tuliprox --genpwd
+       ```
+
+    6. Inspect the tuliprox log for bind errors — another process may already be using the port.
+  </Accordion>
+</AccordionGroup>
+
+## Database inspection
+
+When logs are not enough, inspect the internal databases directly:
+
+| Flag | Contents |
+|---|---|
+| `--dbx` | Xtream channel data |
+| `--dbm` | M3U playlist data |
+| `--dbe` | EPG programme data |
+| `--dbv` | Target-ID virtual mappings |
+| `--dbms` | Metadata retry and failure status |
+
+```bash
+tuliprox --dbms
+```
+
+These viewers are read-only. You can run them while the server is stopped to examine the state of a particular database file.

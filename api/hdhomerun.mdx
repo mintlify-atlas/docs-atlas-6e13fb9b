@@ -1,0 +1,204 @@
+---
+title: "HDHomeRun API"
+description: "HDHomeRun network tuner emulation for Plex, Emby, Jellyfin, and other HDHR-aware clients."
+---
+
+tuliprox can emulate an HDHomeRun network tuner device. Plex DVR, Emby Live TV, Jellyfin Live TV, and similar applications discover and use HDHomeRun devices over the local network. By enabling the `hdhr` section in `config.yml`, tuliprox appears to these applications as a physical tuner.
+
+<Note>
+  HDHomeRun endpoints run on a **separate port** from the main API. Configure the port under the `hdhr` device block in `config.yml`. The device port is typically `5004` by convention but can be any free port.
+</Note>
+
+## Device discovery
+
+### Device description (XML)
+
+```
+GET /device.xml
+```
+
+Returns a UPnP device description XML document. Used by network scanners and some clients for initial discovery.
+
+**Response:** `application/xml`
+
+```xml
+<root xmlns="urn:schemas-upnp-org:device-1-0">
+  <specVersion>
+    <major>1</major>
+    <minor>0</minor>
+  </specVersion>
+  <URLBase>http://192.168.1.9:5004</URLBase>
+  <device>
+    <deviceType>urn:schemas-upnp-org:device:MediaServer:1</deviceType>
+    <friendlyName>tuliprox HDHomeRun</friendlyName>
+    <manufacturer>Silicondust</manufacturer>
+    <modelName>HDHR4-2US</modelName>
+    <modelNumber>HDHR4-2US</modelNumber>
+    <tunerCount>2</tunerCount>
+    <serialNumber>ABCD1234</serialNumber>
+    <UDN>uuid:xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx</UDN>
+  </device>
+</root>
+```
+
+---
+
+### Device info (JSON)
+
+```
+GET /device.json
+```
+
+Returns the same device information as `device.xml` in JSON format.
+
+**Response:** `application/json`
+
+<Expandable title="Response fields">
+  <ResponseField name="FriendlyName" type="string">Human-readable device name from config.</ResponseField>
+  <ResponseField name="Manufacturer" type="string">Manufacturer string (e.g., `Silicondust`).</ResponseField>
+  <ResponseField name="ModelNumber" type="string">Model number string.</ResponseField>
+  <ResponseField name="ModelName" type="string">Model name string.</ResponseField>
+  <ResponseField name="FirmwareName" type="string">Firmware identifier string.</ResponseField>
+  <ResponseField name="TunerCount" type="number">Number of emulated tuners.</ResponseField>
+  <ResponseField name="FirmwareVersion" type="string">Firmware version string.</ResponseField>
+  <ResponseField name="DeviceID" type="string">8-character hex device identifier.</ResponseField>
+  <ResponseField name="DeviceAuth" type="string">Device auth string (empty for tuliprox).</ResponseField>
+  <ResponseField name="BaseURL" type="string">Base URL of this device.</ResponseField>
+  <ResponseField name="LineupURL" type="string">URL of the lineup endpoint.</ResponseField>
+  <ResponseField name="DiscoverURL" type="string">URL of the discover endpoint.</ResponseField>
+</Expandable>
+
+```bash
+curl http://192.168.1.9:5004/device.json
+```
+
+---
+
+### Discover (JSON)
+
+```
+GET /discover.json
+```
+
+Returns the same JSON as `device.json`. Many HDHomeRun-aware clients use this endpoint for discovery.
+
+```bash
+curl http://192.168.1.9:5004/discover.json
+```
+
+---
+
+## Lineup endpoints
+
+### Channel lineup (JSON)
+
+```
+GET /lineup.json
+```
+
+Returns the full channel lineup as a JSON array. Each entry contains the guide number, guide name, and stream URL.
+
+If `basic_auth: true` is configured for the device, the endpoint requires HTTP Basic Auth with the user credentials mapped to this device.
+
+**Response:** `application/json`
+
+<Expandable title="Lineup entry fields">
+  <ResponseField name="GuideNumber" type="string">Channel guide number (mapped from `epg_channel_id` or channel name).</ResponseField>
+  <ResponseField name="GuideName" type="string">Channel display name (title).</ResponseField>
+  <ResponseField name="URL" type="string">Stream URL for this channel. Points to the tuliprox stream endpoint based on the target's output type (M3U or Xtream).</ResponseField>
+</Expandable>
+
+```bash
+# Without basic auth
+curl http://192.168.1.9:5004/lineup.json
+
+# With basic auth enabled
+curl -u alice:s3cr3t http://192.168.1.9:5004/lineup.json
+```
+
+The lineup is built from the target associated with the HDHomeRun device's configured username:
+- If the target has an **M3U output**, live M3U items are used.
+- If the target has an **Xtream output**, live channels and VOD items are combined.
+
+---
+
+### Lineup status
+
+```
+GET /lineup_status.json
+```
+
+Returns the current scan/lineup status. Plex and other clients poll this endpoint to determine when lineup data is ready.
+
+**Response:** `application/json`
+
+When no scan is in progress:
+
+```json
+{
+  "ScanInProgress": 0,
+  "ScanPossible": 1,
+  "Source": "Cable",
+  "SourceList": ["Cable"]
+}
+```
+
+When a scan is in progress:
+
+```json
+{
+  "ScanInProgress": 1,
+  "Progress": 60,
+  "Found": 42
+}
+```
+
+---
+
+### Trigger lineup scan
+
+```
+POST /lineup.post?scan=start
+POST /lineup.post?scan=abort
+```
+
+<ParamField query="scan" type="string" required>
+  Action to perform. Must be `start` or `abort`.
+</ParamField>
+
+Plex and Emby use this endpoint when you click "Scan for new devices" or refresh the tuner lineup in their settings UI.
+
+```bash
+curl -X POST "http://192.168.1.9:5004/lineup.post?scan=start"
+```
+
+---
+
+## Auto-tune endpoints
+
+These paths are reserved for HDHomeRun auto-tune and tuner addressing. tuliprox registers them but does not implement channel switching.
+
+```
+GET /auto/{channel}
+GET /tuner{tuner_num}/{channel}
+```
+
+---
+
+## Integration with Plex, Emby, and Jellyfin
+
+<Tabs>
+  <Tab title="Plex">
+    In Plex Media Server, go to **Settings → Live TV & DVR → Set Up Plex DVR**. Plex scans the local network for HDHomeRun devices. Provide the tuliprox device IP and port when prompted. Plex will use `discover.json` to fetch device info and `lineup.json` for the channel list.
+  </Tab>
+  <Tab title="Emby">
+    In Emby, go to **Dashboard → Live TV → Add TV Source** and choose **HDHomeRun**. Enter `http://<host>:<port>` as the device URL. Emby will discover the lineup via `lineup.json`.
+  </Tab>
+  <Tab title="Jellyfin">
+    In Jellyfin, go to **Dashboard → Live TV → Add Tuner Device** and select **HD Homerun**. Enter the device URL as `http://<host>:<port>`. Jellyfin will call `discover.json` and `lineup.json` automatically.
+  </Tab>
+</Tabs>
+
+<Tip>
+  Set `TunerCount` to the maximum number of simultaneous streams you want Plex/Emby/Jellyfin to request. Match it to your provider's connection limit or the `max_connections` setting of the mapped user.
+</Tip>

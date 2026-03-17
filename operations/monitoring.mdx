@@ -1,0 +1,201 @@
+---
+title: "Monitoring"
+description: "Track active streams, system resources, and receive notifications when tuliprox events occur."
+---
+
+## Web UI monitoring
+
+The Web UI provides a live view of connected users, active streams, and group changes. Enable it in `config.yml`:
+
+```yaml
+web_ui:
+  enabled: true
+  user_ui_enabled: true
+  combine_views_stats_streams: true
+```
+
+Key fields:
+
+- `enabled` — enable the Web UI
+- `user_ui_enabled` — expose the user-facing UI alongside the admin UI
+- `combine_views_stats_streams` — merge view counts, stats, and stream data into a single panel
+- `kick_secs` — number of seconds of inactivity before a user session is ended
+
+## System resource tracking
+
+The `sys_usage` section of `reverse_proxy` exposes CPU and memory telemetry so you can see the resource cost of active streams.
+
+## Log configuration
+
+Configure logging in `config.yml` under the `log` key:
+
+```yaml
+log:
+  log_level: info
+  sanitize_sensitive_info: true
+  log_active_user: true
+```
+
+### `log_level`
+
+`log_level` accepts either a plain level or a comma-separated module filter list:
+
+```yaml
+# Plain level
+log:
+  log_level: debug
+```
+
+```yaml
+# Per-module filter
+log:
+  log_level: hyper_util::client::legacy::connect=error,tuliprox=debug
+```
+
+Valid plain levels: `error`, `warn`, `info`, `debug`, `trace`.
+
+### `sanitize_sensitive_info`
+
+When set to `true`, tuliprox redacts credentials and tokens from log output. Enable this in production to avoid leaking provider URLs or API keys.
+
+### `log_active_user`
+
+When set to `true`, each stream request is logged with the active user identifier.
+
+## Healthcheck endpoint
+
+The `--healthcheck` flag returns a non-zero exit code when the server is not responding. Use it in Docker health checks:
+
+```yaml
+healthcheck:
+  test: ["CMD", "tuliprox", "--healthcheck"]
+  interval: 30s
+  timeout: 5s
+  retries: 3
+```
+
+The flag performs a lightweight HTTP probe against the running server. It does not require additional configuration.
+
+## Notification system
+
+tuliprox can push notifications to Telegram, Discord, Pushover, or any REST endpoint when internal events occur.
+
+### `notify_on` events
+
+| Event | Description |
+|---|---|
+| `info` | General informational messages such as playlist update results |
+| `stats` | Periodic stream and usage statistics |
+| `error` | Errors during playlist fetching or stream delivery |
+| `watch` | Group changes detected between playlist updates |
+
+### Telegram
+
+```yaml
+messaging:
+  notify_on:
+    - info
+    - stats
+    - error
+    - watch
+  telegram:
+    markdown: true
+    bot_token: "<telegram bot token>"
+    chat_ids:
+      - "<chat id>"
+      - "<chat id>:<thread id>"
+```
+
+### Discord
+
+```yaml
+messaging:
+  notify_on:
+    - error
+    - watch
+  discord:
+    webhook_url: "https://discord.com/api/webhooks/<id>/<token>"
+```
+
+### Pushover
+
+```yaml
+messaging:
+  notify_on:
+    - error
+  pushover:
+    user_key: "<user key>"
+    api_token: "<api token>"
+```
+
+### REST
+
+```yaml
+messaging:
+  notify_on:
+    - error
+    - stats
+  rest:
+    url: "https://your-webhook.example.com/notify"
+    method: POST
+```
+
+### Message templates
+
+Templates are optional. When provided they can be a raw Handlebars string, a `file://` path, or an `http(s)://` URL.
+
+Available template variables:
+
+- `message` — the event message text
+- `kind` — the event type (`info`, `stats`, `error`, `watch`)
+- `timestamp` — ISO-8601 timestamp
+- `stats` — stream statistics object (for `stats` events)
+- `watch` — group change object (for `watch` events)
+- `processing` — playlist processing object (for `info` events)
+
+## GeoIP tracking
+
+When the `geoip` block is enabled under `reverse_proxy`, tuliprox resolves the country of each connecting IP from CSV IP-range data. You can schedule automatic database updates with a `GeoIpUpdate` schedule:
+
+```yaml
+schedules:
+  - schedule: "0  0  3  *  *  *  *"
+    type: GeoIpUpdate
+```
+
+The resolved country appears in the Web UI stream table and in log output when `log_active_user` is enabled.
+
+## Rate limit monitoring
+
+Per-IP rate limiting is configured under `reverse_proxy.rate_limit`:
+
+```yaml
+reverse_proxy:
+  rate_limit:
+    enabled: true
+    period_millis: 1000
+    burst_size: 10
+```
+
+When a client exceeds the rate limit, tuliprox returns HTTP `429`. If provider failover is enabled, `429` from the upstream also triggers failover to the next provider URL.
+
+## Database viewers
+
+Use these CLI flags to inspect the internal on-disk databases without starting a full server:
+
+| Flag | Database |
+|---|---|
+| `--dbx` | Xtream data |
+| `--dbm` | M3U data |
+| `--dbe` | EPG data |
+| `--dbv` | Target-ID mapping |
+| `--dbms` | Metadata retry status |
+
+Example:
+
+```bash
+tuliprox --dbx
+tuliprox --dbms
+```
+
+These commands open an interactive viewer and exit when you close it. They are read-only and safe to run against a live `storage_dir`.

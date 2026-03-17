@@ -1,0 +1,481 @@
+---
+title: "Sources and targets (source.yml)"
+description: "Define upstream inputs, provider options, URL schemes, and the output targets Tuliprox publishes to clients."
+---
+
+`source.yml` defines upstream inputs, provider aliases, and the targets Tuliprox publishes to clients.
+
+## Top-level entries
+
+| Entry | Description |
+|-------|-------------|
+| `templates` | Reusable regex fragments referenced by `!name!` syntax |
+| `inputs` | Upstream provider connection definitions |
+| `sources` | Groups that bind inputs to targets |
+
+<Note>
+  For new setups, prefer the global `template_path` in `config.yml`. Inline `templates` in `source.yml` are still supported.
+</Note>
+
+---
+
+## `templates`
+
+Templates reduce repeated regular expressions. Reference another template by wrapping its name in `!` characters.
+
+```yaml
+templates:
+  - name: delimiter
+    value: '[\s_-]*'
+  - name: quality
+    value: '(?i)(?P<quality>HD|LQ|4K|UHD)?'
+```
+
+Usage in a filter:
+
+```text
+^.*TF1!delimiter!Series?!delimiter!Films?(!delimiter!!quality!)\s*$
+```
+
+---
+
+## `inputs`
+
+Each input defines one upstream provider connection.
+
+### Input fields
+
+| Field | Description |
+|-------|-------------|
+| `name` | Unique identifier for this input |
+| `type` | Input type: `m3u`, `xtream`, `library`, `m3u_batch`, `xtream_batch` |
+| `enabled` | Enable or disable this input without removing it |
+| `persist` | Persist the fetched playlist to disk |
+| `url` | Provider URL — supports multiple URL schemes |
+| `epg` | XMLTV EPG sources with priority and smart matching |
+| `headers` | Custom HTTP headers sent with requests |
+| `method` | HTTP method (`GET` or `POST`) |
+| `username` | Provider username (required for `xtream`) |
+| `password` | Provider password (required for `xtream`) |
+| `panel_api` | Panel API configuration for account provisioning |
+| `cache_duration` | How long to cache the fetched playlist |
+| `exp_date` | Account expiry date |
+| `options` | Provider-specific behavior options |
+| `aliases` | Additional credentials for the same provider |
+| `staged` | Alternate source for playlist data during updates |
+
+### URL schemes
+
+| Scheme | Description |
+|--------|-------------|
+| `http://` / `https://` | Standard HTTP provider URL |
+| `file://` | Load a playlist from a local file |
+| `provider://<name>/...` | Reference a named provider definition |
+| `batch://...` | Load aliases from a CSV file |
+
+<Note>
+  If an `m3u` or `xtream` input uses a `batch://` URL, Tuliprox automatically treats it as `m3u_batch` or `xtream_batch`.
+</Note>
+
+### Input types
+
+| Type | Description |
+|------|-------------|
+| `m3u` | Standard M3U/M3U+ playlist |
+| `xtream` | Xtream Codes API |
+| `library` | Local media library |
+| `m3u_batch` | Multiple M3U sources from a CSV file |
+| `xtream_batch` | Multiple Xtream sources from a CSV file |
+
+### `options` fields
+
+<AccordionGroup>
+  <Accordion title="Xtream skip options">
+    | Field | Description |
+    |-------|-------------|
+    | `xtream_skip_live` | Skip live channels from Xtream |
+    | `xtream_skip_vod` | Skip VOD content from Xtream |
+    | `xtream_skip_series` | Skip series content from Xtream |
+    | `xtream_live_stream_without_extension` | Request live streams without file extension |
+    | `xtream_live_stream_use_prefix` | Use a URL prefix for live streams |
+    | `disable_hls_streaming` | Disable HLS streaming mode |
+  </Accordion>
+
+  <Accordion title="Metadata and probe options">
+    | Field | Description |
+    |-------|-------------|
+    | `resolve_tmdb` | Enable TMDB metadata resolution for this input |
+    | `probe_stream` | Enable stream probing for this input |
+    | `resolve_background` | Resolve metadata in the background |
+    | `resolve_series` | Resolve metadata for series |
+    | `resolve_vod` | Resolve metadata for VOD |
+    | `probe_series` | Probe series streams |
+    | `probe_vod` | Probe VOD streams |
+    | `probe_live` | Probe live streams |
+    | `probe_live_interval_hours` | How often to re-probe live streams (hours) |
+    | `resolve_delay` | Delay before starting metadata resolution |
+    | `probe_delay` | Delay before starting stream probing |
+  </Accordion>
+</AccordionGroup>
+
+```yaml
+inputs:
+  - name: my_provider
+    type: xtream
+    url: http://provider.example:8080
+    username: user
+    password: secret
+    options:
+      resolve_tmdb: true
+      probe_stream: true
+      resolve_series: true
+      resolve_vod: true
+```
+
+### EPG configuration
+
+Inputs can define multiple XMLTV sources with priorities and smart matching.
+
+| Field | Description |
+|-------|-------------|
+| `sources[].url` | EPG URL or `auto` to use the provider's own EPG |
+| `sources[].priority` | Lower values take priority |
+| `sources[].logo_override` | Use this EPG source for channel logos |
+| `smart_match.enabled` | Enable smart channel name matching |
+| `smart_match.fuzzy_matching` | Allow fuzzy string matching |
+| `smart_match.match_threshold` | Minimum score to accept a match (0–100) |
+| `smart_match.best_match_threshold` | Score above which the best match is immediately used |
+
+```yaml
+epg:
+  sources:
+    - url: auto
+      priority: -2
+      logo_override: true
+    - url: http://localhost:3001/xmltv.php?epg_id=1
+      priority: -1
+  smart_match:
+    enabled: true
+    fuzzy_matching: true
+    match_threshold: 80
+    best_match_threshold: 99
+```
+
+### Aliases
+
+Aliases let one logical provider input expose multiple credentials — useful when you have several accounts on the same provider.
+
+```yaml
+inputs:
+  - type: xtream
+    name: my_provider
+    url: http://provider.net
+    username: primary
+    password: secret1
+    aliases:
+      - name: my_provider_2
+        url: http://provider.net
+        username: secondary
+        password: secret2
+        max_connections: 2
+```
+
+### Batch inputs
+
+Batch inputs load multiple provider aliases from a CSV file.
+
+**`xtream_batch` CSV columns:**
+
+| Column | Description |
+|--------|-------------|
+| `name` | Alias name |
+| `username` | Xtream username |
+| `password` | Xtream password |
+| `url` | Provider URL |
+| `max_connections` | Connection limit |
+| `priority` | User priority |
+| `exp_date` | Expiry date |
+
+**`m3u_batch` CSV columns:**
+
+| Column | Description |
+|--------|-------------|
+| `url` | M3U playlist URL |
+| `max_connections` | Connection limit |
+| `priority` | User priority |
+
+### `panel_api`
+
+Tuliprox can provision or renew provider accounts through a panel API.
+
+**Supported operations:** `account_info`, `client_info`, `client_new`, `client_renew`, `client_adult_content`
+
+| Field | Description |
+|-------|-------------|
+| `url` | Panel API endpoint URL |
+| `api_key` | API authentication key |
+| `alias_pool.size.min` | Minimum pool size |
+| `alias_pool.size.max` | Maximum pool size |
+| `alias_pool.remove_expired` | Remove expired aliases from the pool |
+| `provisioning.timeout_sec` | Timeout for provisioning requests |
+| `provisioning.method` | HTTP method for provisioning |
+| `provisioning.probe_interval_sec` | How often to probe provisioned accounts |
+| `provisioning.cooldown_sec` | Cooldown between provisioning attempts |
+| `provisioning.offset` | Time offset before expiry to trigger renewal |
+
+```yaml
+panel_api:
+  url: https://panel.example/api.php
+  api_key: "1234567890"
+  provisioning:
+    timeout_sec: 65
+    method: GET
+    probe_interval_sec: 10
+    cooldown_sec: 120
+    offset: 12h
+```
+
+### Staged inputs
+
+`staged` lets Tuliprox read playlist data from an alternate source during updates while still using the main input for streaming and API details.
+
+| Field | Description |
+|-------|-------------|
+| `enabled` | Enable staged input mode |
+| `type` | Type of the staged source |
+| `url` | URL of the staged source |
+| `headers` | Custom headers for the staged source |
+| `method` | HTTP method for the staged source |
+| `username` | Username for the staged source |
+| `password` | Password for the staged source |
+| `live_source` | Override source for live streams |
+| `vod_source` | Override source for VOD |
+| `series_source` | Override source for series |
+
+---
+
+## `sources`
+
+Each source entry groups one or more inputs and binds them to one or more targets.
+
+```yaml
+sources:
+  - inputs:
+      - my_provider
+    targets:
+      - name: all_channels
+        output:
+          - type: xtream
+          - type: m3u
+```
+
+The `inputs` list references input names defined in the top-level `inputs` section.
+
+---
+
+## `targets`
+
+Each target controls how content is processed, filtered, and exposed to clients.
+
+### Target fields
+
+| Field | Description |
+|-------|-------------|
+| `enabled` | Enable or disable this target |
+| `name` | Unique target identifier (referenced in `api-proxy.yml`) |
+| `sort` | Sorting rules for groups and channels |
+| `output` | List of output format definitions |
+| `processing_order` | Order of Filter, Rename, and Map operations |
+| `options` | Target-level behavior options |
+| `filter` | Filter expression to include/exclude content |
+| `rename` | Rename rules for groups or channels |
+| `mapping` | Mapping IDs from `mapping.yml` to apply |
+| `favourites` | Explicit favourite group definitions |
+| `watch` | Group names to watch for changes |
+| `use_memory_cache` | Cache the processed target in memory |
+
+### `output` types
+
+<Tabs>
+  <Tab title="xtream">
+    | Field | Description |
+    |-------|-------------|
+    | `type` | `xtream` |
+    | `skip_live_direct_source` | Do not expose live direct source URLs |
+    | `skip_video_direct_source` | Do not expose video direct source URLs |
+    | `skip_series_direct_source` | Do not expose series direct source URLs |
+    | `update_strategy` | How to handle existing content on update |
+    | `trakt` | Trakt.tv integration settings |
+    | `filter` | Output-level filter expression |
+  </Tab>
+  <Tab title="m3u">
+    | Field | Description |
+    |-------|-------------|
+    | `type` | `m3u` |
+    | `filename` | Output filename for the playlist |
+    | `include_type_in_url` | Append content type to stream URLs |
+    | `mask_redirect_url` | Mask redirect URLs in the output |
+    | `filter` | Output-level filter expression |
+  </Tab>
+  <Tab title="strm">
+    | Field | Description |
+    |-------|-------------|
+    | `type` | `strm` |
+    | `directory` | Output directory for `.strm` files |
+    | `username` | Username to embed in stream URLs |
+    | `underscore_whitespace` | Replace spaces with underscores in filenames |
+    | `cleanup` | Remove stale `.strm` files on update |
+    | `style` | Directory style for output |
+    | `flat` | Write all files to a flat directory (no subdirs) |
+    | `strm_props` | Additional properties in `.strm` files |
+    | `add_quality_to_filename` | Append quality indicator to filenames |
+    | `filter` | Output-level filter expression |
+  </Tab>
+  <Tab title="hdhomerun">
+    | Field | Description |
+    |-------|-------------|
+    | `type` | `hdhomerun` |
+    | `device` | HDHomeRun virtual device identifier |
+    | `username` | Username to use in lineup URLs |
+    | `use_output` | Which output definition to use for URLs |
+  </Tab>
+</Tabs>
+
+### Target `options`
+
+| Field | Description |
+|-------|-------------|
+| `ignore_logo` | Do not include logo URLs in the output |
+| `share_live_streams` | Share one upstream connection across multiple clients |
+| `remove_duplicates` | Remove duplicate channel entries |
+| `force_redirect` | Force redirect mode for all streams in this target |
+
+<Warning>
+  When `share_live_streams` is enabled, each shared live channel holds buffer memory even when multiple clients share the same upstream stream.
+</Warning>
+
+### `sort`
+
+Sorting consists of an ordered list of rules.
+
+| Field | Description |
+|-------|-------------|
+| `target` | Sort target: `group` or `channel` |
+| `field` | Field to sort by |
+| `filter` | Filter expression to scope this rule |
+| `order` | `asc` or `desc` |
+| `sequence` | Ordered list of regex patterns for explicit sequencing |
+
+```yaml
+sort:
+  rules:
+    - target: group
+      order: asc
+      filter: Group ~ ".*"
+      field: group
+      sequence:
+        - '^Freetv'
+        - '^Shopping'
+        - '^Entertainment'
+```
+
+### `processing_order`
+
+Controls the execution order of **F**ilter, **R**ename, and **M**ap operations.
+
+| Value | Order |
+|-------|-------|
+| `frm` | Filter → Rename → Map |
+| `fmr` | Filter → Map → Rename |
+| `rfm` | Rename → Filter → Map |
+| `rmf` | Rename → Map → Filter |
+| `mfr` | Map → Filter → Rename |
+| `mrf` | Map → Rename → Filter |
+
+### `filter` expressions
+
+Filter expressions support boolean logic, regex matching, and type comparisons.
+
+| Field | Description |
+|-------|-------------|
+| `Group` | Channel group name |
+| `Title` | Channel title |
+| `Name` | Channel name |
+| `Caption` | Channel caption |
+| `Url` | Stream URL |
+| `Genre` | Content genre |
+| `Input` | Source input name |
+| `Type` | Content type: `live`, `vod`, `series` |
+
+Operators: `~` (regex match), `NOT`, `AND`, `OR`
+
+```text
+((Group ~ "^DE.*") AND (NOT Title ~ ".*Shopping.*")) OR (Group ~ "^AU.*")
+```
+
+### `rename`
+
+Rename rules apply regex substitution to a field.
+
+| Field | Description |
+|-------|-------------|
+| `field` | Field to rename: `group`, `title`, `name` |
+| `pattern` | Regex pattern to match |
+| `new_name` | Replacement string (supports capture groups) |
+
+```yaml
+rename:
+  - field: group
+    pattern: '^DE(.*)'
+    new_name: '1. DE$1'
+```
+
+### `favourites`
+
+Defines explicit favourite groups that are assembled after mapping and resolution.
+
+```yaml
+favourites:
+  - cluster: series
+    group: "My Favourites"
+    filter: 'Name ~ "Cinema"'
+    match_as_ascii: true
+```
+
+### `watch`
+
+Watches final group names and emits notifications via the messaging system when those groups change.
+
+```yaml
+watch:
+  - 'FR - Movies \(202[34]\)'
+  - 'FR - Series'
+```
+
+---
+
+## Complete example
+
+```yaml
+templates:
+  - name: ALL_CHAN
+    value: 'Group ~ ".*"'
+inputs:
+  - type: xtream
+    name: my_provider
+    url: http://provider.example:8080
+    username: user
+    password: secret
+sources:
+  - inputs:
+      - my_provider
+    targets:
+      - name: all_channels
+        output:
+          - type: xtream
+          - type: m3u
+        options:
+          ignore_logo: false
+          share_live_streams: true
+        filter: "!ALL_CHAN!"
+```

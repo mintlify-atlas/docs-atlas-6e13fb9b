@@ -1,0 +1,308 @@
+---
+title: "Examples and recipes"
+description: "Copy-ready configuration examples for common tuliprox setups."
+---
+
+## Xtream provider quick setup
+
+Minimal working configuration for a single Xtream Codes provider.
+
+Provider details used in this example:
+
+- URL: `http://fantastic.provider.xyz:8080`
+- Username: `tvjunkie`
+- Password: `junkie.secret`
+
+<CodeGroup>
+
+```yaml config.yml
+api:
+  host: 0.0.0.0
+  port: 8901
+  web_root: ./web
+storage_dir: ./data
+update_on_boot: true
+```
+
+```yaml source.yml
+templates:
+  - name: ALL_CHAN
+    value: 'Group ~ ".*"'
+inputs:
+  - type: xtream
+    name: my_provider
+    url: http://fantastic.provider.xyz:8080
+    username: tvjunkie
+    password: junkie.secret
+sources:
+  - inputs:
+      - my_provider
+    targets:
+      - name: all_channels
+        output:
+          - type: xtream
+        filter: "!ALL_CHAN!"
+```
+
+```yaml api-proxy.yml
+server:
+  - name: default
+    protocol: http
+    host: 192.168.1.41
+    port: 8901
+    timezone: Europe/Berlin
+    message: Welcome to tuliprox
+user:
+  - target: all_channels
+    credentials:
+      - username: xt
+        password: xt.secret
+        proxy: redirect
+        server: default
+```
+
+</CodeGroup>
+
+## Multiple provider merging
+
+Combine two providers into a single target by listing both input names under `sources.inputs`:
+
+```yaml source.yml
+templates:
+  - name: ALL_CHAN
+    value: 'Group ~ ".*"'
+inputs:
+  - type: xtream
+    name: provider_a
+    url: http://provider-a.example:8080
+    username: user_a
+    password: pass_a
+  - type: xtream
+    name: provider_b
+    url: http://provider-b.example:8080
+    username: user_b
+    password: pass_b
+sources:
+  - inputs:
+      - provider_a
+      - provider_b
+    targets:
+      - name: merged_channels
+        output:
+          - type: xtream
+          - type: m3u
+        options:
+          remove_duplicates: true
+        filter: "!ALL_CHAN!"
+```
+
+## Filtering examples
+
+### Include all channels
+
+```text
+Group ~ ".*"
+```
+
+### Live channels only
+
+```text
+Type == live
+```
+
+### Only shopping
+
+```text
+Group ~ "(?i).*Shopping.*"
+```
+
+### Exclude shopping
+
+```text
+NOT(Group ~ "(?i).*Shopping.*")
+```
+
+### French and German channels, no shopping
+
+```text
+(Group ~ "^FR.*" AND NOT(Group ~ "^FR.*SERIES.*" OR Group ~ "^DE.*EINKAUFEN.*")) OR (Group ~ "^AU.*")
+```
+
+### Exclude a single channel
+
+```text
+NOT(Title ~ "FR: TV5Monde")
+```
+
+### Exclude a channel within a specific group only
+
+```text
+NOT(Group ~ "FR: TF1" AND Title ~ "FR: TV5Monde")
+```
+
+## Template-based filter composition
+
+Define named templates and compose them with `!name!`:
+
+```yaml source.yml
+templates:
+  - name: NO_SHOPPING
+    value: 'NOT(Group ~ "(?i).*Shopping.*" OR Group ~ "(?i).*Einkaufen.*")'
+  - name: GERMAN_CHANNELS
+    value: 'Group ~ "^DE: .*"'
+  - name: FRENCH_CHANNELS
+    value: 'Group ~ "^FR: .*"'
+  - name: MY_CHANNELS
+    value: '!NO_SHOPPING! AND (!GERMAN_CHANNELS! OR !FRENCH_CHANNELS!)'
+```
+
+Use in a target:
+
+```yaml source.yml
+targets:
+  - name: my_target
+    filter: "!MY_CHANNELS!"
+    output:
+      - type: xtream
+```
+
+## Mapping and rename example
+
+Rename group prefixes and enrich with quality labels:
+
+```yaml mapping.yml
+mappings:
+  templates:
+    - name: QUALITY
+      value: '(?i)\b([FUSL]?HD|SD|4K|1080p|720p|3840p)\b'
+  mapping:
+    - id: all_channels
+      match_as_ascii: true
+      mapper:
+        - filter: 'Caption ~ "(?i)^(US|USA|United States).*?TNT"'
+          script: |
+            quality = uppercase(@Caption ~ "!QUALITY!")
+            quality = map quality {
+              "720p" => "HD",
+              "1080p" => "FHD",
+              "4K" => "UHD",
+              "3840p" => "UHD",
+              _ => quality,
+            }
+            @Group = "United States - Entertainment"
+```
+
+Simple rename rule in `source.yml`:
+
+```yaml source.yml
+rename:
+  - field: group
+    pattern: '^DE(.*)'
+    new_name: '1. DE$1'
+```
+
+## VLC seek problem with user_access_control
+
+Seeking can generate very fast reconnects and byte-range requests.
+If stale provider connections have not yet disappeared, the user can briefly appear above `max_connections`.
+
+Typical mitigation:
+
+```yaml config.yml
+reverse_proxy:
+  stream:
+    grace_period_millis: 2000
+    grace_period_timeout_secs: 5
+```
+
+## Docker with Traefik
+
+Deploy tuliprox behind Traefik with path-based routing:
+
+```yaml docker-compose.yml
+services:
+  tuliprox:
+    container_name: tuliprox
+    image: ghcr.io/euzu/tuliprox-alpine:latest
+    working_dir: /app
+    volumes:
+      - /home/tuliprox/tuliprox:/app/tuliprox
+      - /home/tuliprox/config:/app/config
+      - /home/tuliprox/data:/app/data
+      - /home/tuliprox/cache:/app/cache
+    environment:
+      - TZ=Europe/Paris
+    ports:
+      - "8901:8901"
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.tuliprox.rule=Host(`tv.my-domain.io`) && (PathPrefix(`/tv`) || PathPrefix(`/tuliprox`))"
+      - "traefik.http.middlewares.tuliprox-strip.stripprefix.prefixes=/tv"
+```
+
+When Traefik terminates TLS and proxies to tuliprox, add the path offset to `api-proxy.yml`:
+
+```yaml api-proxy.yml
+server:
+  - name: default
+    protocol: https
+    host: tv.my-domain.io
+    port: "443"
+    timezone: Europe/Paris
+    message: Welcome to tuliprox
+    path: tuliprox
+  - name: local
+    protocol: http
+    host: 192.168.1.41
+    port: "8901"
+    timezone: Europe/Paris
+    message: Welcome to tuliprox
+```
+
+Forward real IP headers in Traefik or nginx so tuliprox sees the client address:
+
+```nginx
+location /tuliprox {
+  rewrite ^/tuliprox/(.*)$ /$1 break;
+  proxy_set_header X-Real-IP $remote_addr;
+  proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+  proxy_pass http://192.168.1.9:8901/;
+  proxy_redirect off;
+  proxy_buffering off;
+  proxy_request_buffering off;
+  proxy_cache off;
+  tcp_nopush on;
+  tcp_nodelay on;
+}
+```
+
+## Local library CLI commands
+
+```bash
+./tuliprox --scan-library
+./tuliprox --force-library-rescan
+./tuliprox --dbx /opt/tuliprox/data/all_channels/xtream/video.db
+./tuliprox --dbm /opt/tuliprox/data/all_channels/m3u.db
+./tuliprox --dbe /opt/tuliprox/data/all_channels/xtream/epg.db
+```
+
+## Custom fallback video generation
+
+Convert a still image into a `.ts` fallback stream for use with `custom_stream_response_path`:
+
+```bash
+ffmpeg -y -nostdin -loop 1 -framerate 30 -i blank_screen.jpg -f lavfi \
+  -i anullsrc=channel_layout=stereo:sample_rate=48000 -t 10 -shortest -c:v libx264 \
+  -pix_fmt yuv420p -preset veryfast -crf 23 -x264-params "keyint=30:min-keyint=30:scenecut=0:bframes=0:open_gop=0" \
+  -c:a aac -b:a 128k -ac 2 -ar 48000 -mpegts_flags +resend_headers -muxdelay 0 -muxpreload 0 -f mpegts blank_screen.ts
+```
+
+Place the generated `.ts` file in the `custom_stream_response_path` directory and name it one of:
+
+- `channel_unavailable.ts`
+- `user_connections_exhausted.ts`
+- `provider_connections_exhausted.ts`
+- `low_priority_preempted.ts`
+- `user_account_expired.ts`
+- `panel_api_provisioning.ts`

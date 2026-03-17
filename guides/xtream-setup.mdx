@@ -1,0 +1,178 @@
+---
+title: "Xtream Codes setup"
+description: "Configure an Xtream Codes provider as an input and expose it to clients."
+---
+
+Xtream Codes is the most common IPTV provider protocol. This guide walks you through connecting a provider, defining a target and granting client access.
+
+## Prerequisites
+
+You need the following from your provider:
+
+- Base URL (e.g. `http://fantastic.provider.xyz:8080`)
+- Username
+- Password
+
+## Step 1: Define the input
+
+<Steps>
+  <Step title="Open source.yml">
+    Add an entry under `inputs` with `type: xtream`.
+
+    ```yaml source.yml
+    inputs:
+      - type: xtream
+        name: my_provider
+        url: http://fantastic.provider.xyz:8080
+        username: tvjunkie
+        password: junkie.secret
+    ```
+
+    The `name` is a local identifier you reference later in `sources`.
+  </Step>
+
+  <Step title="Create a source and target">
+    Add a `sources` block that wires the input to a named target with an xtream output.
+
+    ```yaml source.yml
+    templates:
+      - name: ALL_CHAN
+        value: 'Group ~ ".*"'
+    inputs:
+      - type: xtream
+        name: my_provider
+        url: http://fantastic.provider.xyz:8080
+        username: tvjunkie
+        password: junkie.secret
+    sources:
+      - inputs:
+          - my_provider
+        targets:
+          - name: all_channels
+            output:
+              - type: xtream
+            filter: "!ALL_CHAN!"
+    ```
+  </Step>
+
+  <Step title="Configure api-proxy.yml">
+    Tell tuliprox which public URL to advertise and create a client credential.
+
+    ```yaml api-proxy.yml
+    server:
+      - name: default
+        protocol: http
+        host: 192.168.1.41
+        port: 8901
+        timezone: Europe/Berlin
+        message: Welcome to tuliprox
+    user:
+      - target: all_channels
+        credentials:
+          - username: xt
+            password: xt.secret
+            proxy: redirect
+            server: default
+    ```
+
+    Set `proxy: reverse` if you want tuliprox to proxy stream traffic instead of redirecting clients directly to the provider.
+  </Step>
+
+  <Step title="Set core config">
+    A minimal `config.yml` for server mode:
+
+    ```yaml config.yml
+    api:
+      host: 0.0.0.0
+      port: 8901
+      web_root: ./web
+    storage_dir: ./data
+    update_on_boot: true
+    ```
+  </Step>
+</Steps>
+
+## Xtream input options
+
+Pass these under `options` on the input:
+
+| Option | Description |
+|---|---|
+| `xtream_skip_live` | Do not fetch live channels from this provider |
+| `xtream_skip_vod` | Do not fetch VOD entries |
+| `xtream_skip_series` | Do not fetch series |
+| `xtream_live_stream_without_extension` | Strip file extension from live stream URLs |
+| `xtream_live_stream_use_prefix` | Use the stream-URL prefix format instead of numeric IDs |
+| `resolve_tmdb` | Enrich VOD/series metadata via TMDB |
+| `probe_stream` | Probe streams to detect codec and quality information |
+| `resolve_series` | Fetch detailed series metadata |
+| `resolve_vod` | Fetch detailed VOD metadata |
+
+Example with options:
+
+```yaml source.yml
+inputs:
+  - type: xtream
+    name: my_provider
+    url: http://fantastic.provider.xyz:8080
+    username: tvjunkie
+    password: junkie.secret
+    options:
+      xtream_skip_series: true
+      xtream_live_stream_without_extension: true
+      resolve_tmdb: true
+```
+
+## Xtream output options
+
+Pass these under the `output` entry with `type: xtream`:
+
+| Field | Default | Description |
+|---|---|---|
+| `skip_live_direct_source` | `true` | Hide provider direct-source URL for live |
+| `skip_video_direct_source` | `true` | Hide provider direct-source URL for VOD |
+| `skip_series_direct_source` | `true` | Hide provider direct-source URL for series |
+| `filter` | — | Extra per-output filter expression |
+
+## Testing the connection
+
+After starting tuliprox, verify the Xtream endpoint responds:
+
+```bash
+curl "http://localhost:8901/player_api.php?username=xt&password=xt.secret"
+```
+
+You should receive a JSON response with `user_info` and `server_info` fields.
+
+To fetch the live category list:
+
+```bash
+curl "http://localhost:8901/player_api.php?username=xt&password=xt.secret&action=get_live_categories"
+```
+
+## Common issues
+
+<AccordionGroup>
+  <Accordion title="Empty playlist after boot">
+    If `update_on_boot: true` is set, tuliprox fetches the provider on first start.
+    Check the logs for HTTP errors from the provider URL.
+    You can also trigger a manual update from the Web UI.
+  </Accordion>
+
+  <Accordion title="401 or 403 from provider">
+    Double-check the `username` and `password` fields in `source.yml`.
+    Note that tuliprox does not attempt failover for `401` or `403` responses.
+  </Accordion>
+
+  <Accordion title="Streams not playing in client">
+    If `proxy: redirect` is set, the client connects directly to the provider.
+    Switch to `proxy: reverse` so tuliprox buffers the stream, or ensure the
+    client can reach the provider URL directly.
+  </Accordion>
+
+  <Accordion title="Series or VOD missing">
+    Check that `xtream_skip_vod` and `xtream_skip_series` are not set to `true`
+    unintentionally. Also confirm the provider actually supplies those content
+    types at the given URL.
+  </Accordion>
+</AccordionGroup>

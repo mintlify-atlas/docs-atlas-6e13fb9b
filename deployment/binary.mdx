@@ -1,0 +1,187 @@
+---
+title: "Binary deployment"
+description: "Run a pre-built tuliprox static binary directly on Linux, set up a systemd service, and reference all CLI flags."
+---
+
+You can run tuliprox as a standalone static binary without Docker. The recommended builds use musl for maximum portability across Linux distributions.
+
+## Pre-built static binaries
+
+Pre-built musl binaries are published as release artifacts on GitHub. Download the binary for your architecture, make it executable, and run it directly — no runtime dependencies are required.
+
+## Home directory setup
+
+tuliprox resolves its home directory in this order:
+
+1. `--home` CLI flag
+2. `TULIPROX_HOME` environment variable
+3. Directory of the `tuliprox` binary
+
+A typical directory layout under the home:
+
+```text
+tuliprox-home/
+├── config/
+│   ├── config.yml
+│   ├── source.yml
+│   └── api-proxy.yml
+├── data/
+│   └── backup/
+├── downloads/
+└── web/
+```
+
+## Running the binary
+
+<Tabs>
+  <Tab title="Server mode">
+    Run tuliprox as a persistent server with the Web UI and background tasks enabled:
+
+    ```bash
+    ./tuliprox -s -p /path/to/config
+    ```
+
+    Or with explicit config files:
+
+    ```bash
+    ./tuliprox -s -c config/config.yml -i config/source.yml
+    ```
+  </Tab>
+  <Tab title="CLI mode">
+    Process playlists once and exit:
+
+    ```bash
+    ./tuliprox -c config/config.yml -i config/source.yml
+    ```
+  </Tab>
+</Tabs>
+
+## CLI flags reference
+
+```text
+Usage: tuliprox [OPTIONS]
+
+Options:
+  -H, --home <HOME>
+  -p, --config-path <CONFIG_PATH>
+  -c, --config <CONFIG_FILE>
+  -i, --source <SOURCE_FILE>
+  -m, --mapping <MAPPING_FILE>
+  -T, --template <TEMPLATE_FILE>
+  -t, --target <TARGET>
+  -a, --api-proxy <API_PROXY>
+  -s, --server
+  -l, --log-level <LOG_LEVEL>
+  --genpwd
+  --healthcheck
+  --scan-library
+  --force-library-rescan
+  --dbx
+  --dbm
+  --dbms
+  --dbe
+  --dbv
+```
+
+`--dbx`, `--dbm`, `--dbe`, `--dbv`, and `--dbms` open internal database viewers for Xtream, M3U, EPG, target-id mapping, and metadata retry status respectively.
+
+Generate a hashed password for the Web UI:
+
+```bash
+./tuliprox --genpwd
+```
+
+## Running as a systemd service
+
+<Steps>
+  <Step title="Copy the binary">
+    ```bash
+    sudo cp tuliprox /usr/local/bin/tuliprox
+    sudo chmod +x /usr/local/bin/tuliprox
+    ```
+  </Step>
+
+  <Step title="Create the service user and directories">
+    ```bash
+    sudo useradd --system --no-create-home --shell /bin/false tuliprox
+    sudo mkdir -p /opt/tuliprox/{config,data,cache}
+    sudo chown -R tuliprox:tuliprox /opt/tuliprox
+    ```
+  </Step>
+
+  <Step title="Create the systemd unit file">
+    ```ini /etc/systemd/system/tuliprox.service
+    [Unit]
+    Description=tuliprox IPTV proxy
+    After=network.target
+
+    [Service]
+    Type=simple
+    User=tuliprox
+    ExecStart=/usr/local/bin/tuliprox -s -p /opt/tuliprox/config
+    Restart=on-failure
+    RestartSec=5s
+
+    [Install]
+    WantedBy=multi-user.target
+    ```
+  </Step>
+
+  <Step title="Enable and start the service">
+    ```bash
+    sudo systemctl daemon-reload
+    sudo systemctl enable tuliprox
+    sudo systemctl start tuliprox
+    sudo systemctl status tuliprox
+    ```
+  </Step>
+</Steps>
+
+## Building a static binary yourself
+
+If you need to build from source rather than using a release artifact, the recommended approach is a musl cross-compilation:
+
+```bash
+cross build -p tuliprox --release --target x86_64-unknown-linux-musl
+```
+
+The output binary is at `target/x86_64-unknown-linux-musl/release/tuliprox`.
+
+### Prerequisites on Debian or Ubuntu
+
+```bash
+rustup update
+sudo apt-get install pkg-config musl-tools libssl-dev
+rustup target add x86_64-unknown-linux-musl
+```
+
+Then build without `cross`:
+
+```bash
+cargo build -p tuliprox --release --target x86_64-unknown-linux-musl
+```
+
+## Cross-compilation targets
+
+<Tabs>
+  <Tab title="x86_64 Linux (musl)">
+    ```bash
+    cross build -p tuliprox --release --target x86_64-unknown-linux-musl
+    ```
+  </Tab>
+  <Tab title="armv7 (Raspberry Pi)">
+    ```bash
+    cross build -p tuliprox --release --target armv7-unknown-linux-musleabihf
+    ```
+  </Tab>
+  <Tab title="Windows (x86_64)">
+    ```bash
+    rustup target add x86_64-pc-windows-gnu
+    cargo build -p tuliprox --release --target x86_64-pc-windows-gnu
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  `cross` uses Docker internally to provide the correct cross-compilation toolchain. Install it with `cargo install cross`.
+</Note>
